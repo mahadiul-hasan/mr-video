@@ -1,0 +1,177 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Admin {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  passwordHash String
+
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model Video {
+  id            String   @id @default(uuid())
+  title         String
+  slug          String   @unique
+  description   String?
+
+  cloudinaryId  String
+  hlsUrl        String
+
+  thumbnailUrl  String
+  duration      Int
+
+  views         Int      @default(0)
+  isPublished   Boolean  @default(false)
+
+  categoryId    String?
+  category      Category? @relation(fields: [categoryId], references: [id])
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tags          VideoTag[]
+
+  @@index([isPublished, createdAt(sort: Desc)])
+  @@index([categoryId, isPublished])
+  @@index([views(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+}
+
+model Category {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  slug      String   @unique
+
+  videos    Video[]
+
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model Tag {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  slug      String   @unique
+
+  videos    VideoTag[]
+
+  createdAt DateTime @default(now())
+
+  @@index([name])
+  @@index([createdAt])
+}
+
+model VideoTag {
+  videoId String
+  tagId   String
+
+  video   Video @relation(fields: [videoId], references: [id])
+  tag     Tag   @relation(fields: [tagId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@id([videoId, tagId])
+
+  @@index([tagId])
+  @@index([videoId])
+}
+
+model AdUnit {
+  id        String   @id @default(uuid())
+
+  name      String
+  type      AdType
+
+  script    String
+
+  placement String?  // UI ads only (BANNER / NATIVE / SOCIAL_BAR)
+
+  isActive  Boolean  @default(true)
+
+  // 🎯 ENGINE INPUT SIGNALS
+  priority  Int      @default(0)
+  weight    Int      @default(1)
+
+  cooldownSeconds Int?  // per-ad hard cooldown
+  frequencyCap    Int?  // max per session/day
+
+  createdAt DateTime @default(now())
+
+  @@index([type, isActive])
+  @@index([placement])
+  @@index([priority(sort: Desc)])
+}
+
+enum AdType {
+  POPUNDER
+  SOCIAL_BAR
+  NATIVE_BANNER
+  BANNER
+  SMARTLINK
+  INTERSTITIAL
+}
+
+model AdSetting {
+  id String @id @default(uuid())
+
+  // 🔥 global toggles
+  popunderEnabled     Boolean @default(true)
+  smartlinkEnabled    Boolean @default(true)
+  interstitialEnabled Boolean @default(true)
+  socialBarEnabled    Boolean @default(true)
+  bannerEnabled       Boolean @default(true)
+  nativeEnabled       Boolean @default(true)
+
+  // ⚡ engine tuning (score.ts input)
+  smartlinkMinPerMinute Int @default(2)
+  smartlinkMaxPerMinute Int @default(3)
+
+  interstitialGapSeconds  Int @default(60)
+  interstitialEveryVideos Int @default(3)
+
+  popunderCooldownHours Int @default(24)
+
+  // 🧠 scoring weights (NEW → connects to score.ts)
+  weightSmartlink     Int @default(100)
+  weightPopunder      Int @default(120)
+  weightInterstitial  Int @default(90)
+  weightSocialBar     Int @default(70)
+  weightBanner        Int @default(40)
+  weightNative        Int @default(50)
+
+  updatedAt DateTime @updatedAt
+}
+
+model AdSession {
+  id        String   @id @default(uuid())
+  sessionId String   @unique
+
+  // 🧠 scoring inputs
+  videoCount Int @default(0)
+
+  smartClicks Int @default(0)
+  interstitialCount Int @default(0)
+
+  // ⏱ timing signals (rules.ts uses this)
+  lastSmartTrigger DateTime?
+  lastInterstitial DateTime?
+  lastPopunder DateTime?
+
+  // 🧠 engine score cache (optional optimization)
+  engagementScore Float @default(0)
+
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@index([sessionId])
+}
