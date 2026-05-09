@@ -19,7 +19,6 @@ async function main() {
   });
 
   if (existing) {
-    console.log("Admin already exists");
     return;
   }
 
@@ -31,8 +30,6 @@ async function main() {
       passwordHash,
     },
   });
-
-  console.log("✅ Admin created");
 }
 
 main()

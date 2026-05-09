@@ -10,7 +10,8 @@ import { revalidatePath } from "next/cache";
 import { redis } from "@/lib/redis";
 import prisma from "@/lib/prisma";
 
-export interface CacheStatsData {
+export interface CacheStats {
+  // Changed from CacheStatsData to CacheStats
   totalKeys: number;
   memory: string;
   hitRate: string;
@@ -24,7 +25,7 @@ export interface CacheStatsData {
 
 export async function getCacheStatistics(): Promise<{
   success: boolean;
-  data?: CacheStatsData;
+  data?: CacheStats;
   error?: string;
 }> {
   try {
@@ -58,7 +59,6 @@ export async function getCacheStatistics(): Promise<{
       },
     };
   } catch (error) {
-    console.error("Failed to get cache stats:", error);
     return { success: false, error: "Failed to fetch cache statistics" };
   }
 }
@@ -95,7 +95,6 @@ export async function clearCache(
 
     return { success: true, message: `${type} cache cleared successfully` };
   } catch (error) {
-    console.error("Failed to clear cache:", error);
     return { success: false, error: "Failed to clear cache" };
   }
 }
@@ -134,7 +133,6 @@ export async function getSystemMetrics() {
       },
     };
   } catch (error) {
-    console.error("Failed to get system metrics:", error);
     return { success: false, error: "Failed to fetch system metrics" };
   }
 }

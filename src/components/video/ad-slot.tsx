@@ -1,59 +1,52 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import type { AdType } from "@/lib/ads/ad-types";
+import { useEffect, useState } from "react";
+import { useAd } from "@/components/providers/ad-provider";
 import type { MonetizationAd } from "@/lib/ads/engine/types";
+import { AdPlacement } from "@/lib/ads/ad-placements";
 
-type AdSlotProps = {
-  type: AdType;
-  label: string;
-  ad?: MonetizationAd | null;
+interface AdSlotProps {
+  placement: AdPlacement;
+  type: "BANNER" | "NATIVE_BANNER";
+  label?: string;
   compact?: boolean;
-};
+  ad?: MonetizationAd | null;
+}
 
-export function AdSlot({ type, label, ad, compact = false }: AdSlotProps) {
-  const ref = useRef<HTMLDivElement>(null);
+export function AdSlot({
+  placement,
+  type,
+  label,
+  compact,
+  ad: propAd,
+}: AdSlotProps) {
+  const [ad, setAd] = useState<MonetizationAd | null>(propAd || null);
+  const { displayBannerAd, displayNativeAd } = useAd();
 
   useEffect(() => {
-    if (!ad?.script || !ref.current) return;
+    // If ad is passed via props, don't fetch it again
+    if (propAd) return;
 
-    const target = ref.current;
-    target.innerHTML = "";
-
-    const container = document.createElement("div");
-    container.innerHTML = ad.script;
-
-    const scripts = Array.from(container.querySelectorAll("script"));
-    scripts.forEach((scriptNode) => scriptNode.remove());
-
-    target.append(...Array.from(container.childNodes));
-
-    for (const scriptNode of scripts) {
-      const executableScript = document.createElement("script");
-
-      for (const attribute of Array.from(scriptNode.attributes)) {
-        executableScript.setAttribute(attribute.name, attribute.value);
-      }
-
-      executableScript.text = scriptNode.text;
-      target.appendChild(executableScript);
-    }
-  }, [ad?.id, ad?.script]);
+    const adResult =
+      type === "BANNER"
+        ? displayBannerAd(placement)
+        : displayNativeAd(placement);
+    setAd(adResult);
+  }, [placement, type, displayBannerAd, displayNativeAd, propAd]);
 
   if (!ad) return null;
 
   return (
-    <aside
-      ref={ref}
-      className={[
-        "flex items-center justify-center border border-dashed border-border bg-muted/45 text-muted-foreground",
-        compact
-          ? "min-h-28 rounded-md p-4 text-xs"
-          : "min-h-20 rounded-md p-5 text-sm",
-      ].join(" ")}
-      data-ad-slot={type}
-    >
-      <span className="sr-only">{label}</span>
-    </aside>
+    <div className={compact ? "w-full" : "w-full"}>
+      {label && (
+        <div className="mb-2 text-xs font-medium text-muted-foreground">
+          {label}
+        </div>
+      )}
+      <div
+        dangerouslySetInnerHTML={{ __html: ad.script }}
+        className="ad-container"
+      />
+    </div>
   );
 }

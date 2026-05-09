@@ -41,12 +41,7 @@ export async function getCachedData<T>(
     if (cached) {
       try {
         return JSON.parse(cached) as T;
-      } catch (parseError) {
-        console.error(
-          `Failed to parse cached data for key ${key}:`,
-          parseError,
-        );
-      }
+      } catch (parseError) {}
     }
 
     // Fetch fresh data
@@ -59,7 +54,6 @@ export async function getCachedData<T>(
 
     return data;
   } catch (error) {
-    console.error(`Cache error for key ${key}:`, error);
     return fetcher();
   }
 }
@@ -72,9 +66,7 @@ export async function setCachedData<T>(
 ): Promise<void> {
   try {
     await redis.setex(key, ttl, JSON.stringify(data));
-  } catch (error) {
-    console.error(`Failed to set cache for key ${key}:`, error);
-  }
+  } catch (error) {}
 }
 
 // Get cache without fallback
@@ -86,7 +78,6 @@ export async function getCached<T>(key: string): Promise<T | null> {
     }
     return null;
   } catch (error) {
-    console.error(`Failed to get cache for key ${key}:`, error);
     return null;
   }
 }
@@ -97,13 +88,8 @@ export async function invalidateCachePattern(pattern: string): Promise<void> {
     const keys = await redis.keys(pattern);
     if (keys.length > 0) {
       await redis.del(...keys);
-      console.log(
-        `Invalidated ${keys.length} cache keys matching pattern: ${pattern}`,
-      );
     }
-  } catch (error) {
-    console.error(`Failed to invalidate cache pattern ${pattern}:`, error);
-  }
+  } catch (error) {}
 }
 
 // Batch invalidate multiple patterns
@@ -136,7 +122,6 @@ export async function getCacheStats(): Promise<{
       hitRate: `${hitRate}%`,
     };
   } catch (error) {
-    console.error("Failed to get cache stats:", error);
     return {
       totalKeys: 0,
       memory: "0",
@@ -149,8 +134,5 @@ export async function getCacheStats(): Promise<{
 export async function clearAllCache(): Promise<void> {
   try {
     await redis.flushall();
-    console.log("All cache cleared");
-  } catch (error) {
-    console.error("Failed to clear cache:", error);
-  }
+  } catch (error) {}
 }

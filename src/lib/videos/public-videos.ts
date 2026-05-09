@@ -4,7 +4,6 @@ import {
   getCachedData,
   invalidateCachePattern,
   CACHE_TTL,
-  CACHE_TAGS,
 } from "@/lib/cache/cache-utils";
 import { rateLimit } from "@/lib/rate-limit";
 
@@ -115,7 +114,7 @@ export async function searchPublicVideos({
       });
       return videos.map(mapPublicVideo);
     },
-    CACHE_TTL.MEDIUM, // Shorter TTL for search results
+    CACHE_TTL.MEDIUM,
   );
 }
 
@@ -292,43 +291,30 @@ export async function getRelatedPublicVideos({
 // ============================
 
 export async function revalidatePublicCaches() {
-  // Invalidate all public cache patterns
   await invalidateCachePattern("public:*");
-
-  // Also invalidate specific tag patterns for Next.js
-  // (These would be used with revalidateTag if you're using fetch)
-  console.log("Public caches invalidated");
 }
 
 export async function revalidateVideoCache(slug: string) {
-  // Invalidate specific video caches
   await invalidateCachePattern(`public:single-video:${slug}`);
   await invalidateCachePattern(`public:related:${slug}:*`);
   await invalidateCachePattern("public:videos:*");
   await invalidateCachePattern("public:home:*");
-
-  console.log(`Video cache invalidated for: ${slug}`);
 }
 
 export async function revalidateCategoryCache(slug: string) {
   await invalidateCachePattern(`public:category:${slug}:*`);
   await invalidateCachePattern("public:categories:*");
   await invalidateCachePattern("public:videos:*");
-
-  console.log(`Category cache invalidated for: ${slug}`);
 }
 
 export async function revalidateTagCache(slug: string) {
   await invalidateCachePattern(`public:tag:${slug}:*`);
   await invalidateCachePattern("public:tags:*");
   await invalidateCachePattern("public:videos:*");
-
-  console.log(`Tag cache invalidated for: ${slug}`);
 }
 
 export async function revalidateSearchCache() {
   await invalidateCachePattern("public:search:*");
-  console.log("Search cache invalidated");
 }
 
 // ============================
@@ -341,10 +327,9 @@ export async function incrementVideoViews(slug: string) {
       where: { slug },
       data: { views: { increment: 1 } },
     });
-    // Invalidate video cache to show updated view count
     await revalidateVideoCache(slug);
-  } catch (error) {
-    console.error(`Failed to increment views for ${slug}:`, error);
+  } catch {
+    // Silently fail - don't log errors
   }
 }
 

@@ -1,12 +1,11 @@
 import { calculateAdScore } from "./score";
 import type { AdSessionState } from "./session";
-import type { MonetizationAd, MonetizationSettings } from "./types";
+import type { MonetizationAd } from "./types";
 
 export function selectAd(
   ads: MonetizationAd[],
   type: string,
   session: AdSessionState,
-  settings: MonetizationSettings,
 ) {
   const now = Date.now();
 
@@ -14,7 +13,12 @@ export function selectAd(
     if (!ad.isActive) return false;
     if (ad.type !== type) return false;
 
-    if (ad.frequencyCap && (session.shownCounts?.[ad.id] ?? 0) >= ad.frequencyCap) return false;
+    if (
+      ad.frequencyCap &&
+      (session.shownCounts?.[ad.id] ?? 0) >= ad.frequencyCap
+    ) {
+      return false;
+    }
 
     if (
       ad.cooldownSeconds &&
@@ -29,16 +33,13 @@ export function selectAd(
 
   if (!candidates.length) return null;
 
-  const sorted = candidates.toSorted((a, b) => {
-    const score = calculateAdScore(b, session, settings) - calculateAdScore(a, session, settings);
-    if (score !== 0) return score;
-
-    const aTime = new Date(a.createdAt ?? 0).getTime();
-    const bTime = new Date(b.createdAt ?? 0).getTime();
-    if (aTime !== bTime) return bTime - aTime;
-
-    return String(a.id).localeCompare(String(b.id));
-  });
-
-  return sorted[0] ?? null;
+  return candidates.sort((a, b) => {
+    const scoreA = calculateAdScore(a, session);
+    const scoreB = calculateAdScore(b, session);
+    if (scoreA !== scoreB) return scoreB - scoreA;
+    return (
+      new Date(b.createdAt ?? 0).getTime() -
+      new Date(a.createdAt ?? 0).getTime()
+    );
+  })[0];
 }

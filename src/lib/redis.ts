@@ -20,7 +20,6 @@ export const redis =
     maxRetriesPerRequest: 3,
     retryStrategy: (times: number) => {
       if (times > 3) {
-        console.error(`Redis connection failed after ${times} attempts`);
         return null;
       }
       return Math.min(times * 100, 3000);
@@ -42,19 +41,13 @@ if (process.env.NODE_ENV !== "production") {
   globalForRedis.redis = redis;
 }
 
-// Redis event handlers
-redis.on("connect", () => console.log("✅ Redis connected"));
-redis.on("error", (error) => {
-  console.error("❌ Redis error:", error);
-});
-redis.on("ready", () => console.log("✅ Redis ready"));
-redis.on("close", () => console.log("⚠️ Redis connection closed"));
+// Redis event handlers (silent)
+redis.on("error", () => {});
 
 // Graceful shutdown
 const disconnectRedis = async () => {
   if (redis) {
     await redis.quit();
-    console.log("Redis disconnected");
   }
 };
 

@@ -13,7 +13,6 @@ export async function loadMoreHomeVideos(page: number) {
   try {
     return await getPublicVideos({ page, limit: PAGE_SIZE });
   } catch (error) {
-    console.error(`Error loading home videos page ${page}:`, error);
     return [];
   }
 }
@@ -26,10 +25,6 @@ export async function loadMoreSearchVideos(query: string, page: number) {
   try {
     return await searchPublicVideos({ query, page, limit: PAGE_SIZE });
   } catch (error) {
-    console.error(
-      `Error loading search videos for "${query}" page ${page}:`,
-      error,
-    );
     return [];
   }
 }
@@ -47,10 +42,6 @@ export async function loadMoreCategoryVideos(slug: string, page: number) {
     });
     return result?.videos ?? [];
   } catch (error) {
-    console.error(
-      `Error loading category videos for "${slug}" page ${page}:`,
-      error,
-    );
     return [];
   }
 }
@@ -64,10 +55,6 @@ export async function loadMoreTagVideos(slug: string, page: number) {
     const result = await getPublicVideosByTag({ slug, page, limit: PAGE_SIZE });
     return result?.videos ?? [];
   } catch (error) {
-    console.error(
-      `Error loading tag videos for "${slug}" page ${page}:`,
-      error,
-    );
     return [];
   }
 }

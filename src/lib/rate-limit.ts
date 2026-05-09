@@ -51,7 +51,6 @@ export async function rateLimit(
       reset,
     };
   } catch (error) {
-    console.error("Rate limit error:", error);
     // On error, allow the request (fail open)
     return {
       success: true,
@@ -90,7 +89,6 @@ export async function getRateLimitStatus(
       reset,
     };
   } catch (error) {
-    console.error("Rate limit status error:", error);
     return {
       success: true,
       limit,
@@ -108,7 +106,5 @@ export async function resetRateLimit(
   const key = `ratelimit:${type}:${identifier}`;
   try {
     await redis.del(key);
-  } catch (error) {
-    console.error("Failed to reset rate limit:", error);
-  }
+  } catch (error) {}
 }

@@ -1,6 +1,7 @@
 import "server-only";
-
+import { cache } from "react";
 import prisma from "@/lib/prisma";
+import { getCachedData, CACHE_TTL } from "@/lib/cache/cache-utils";
 import type {
   MonetizationAd,
   MonetizationSettings,
@@ -18,38 +19,42 @@ const DEFAULT_AD_SETTINGS: MonetizationSettings = {
   interstitialGapSeconds: 60,
   interstitialEveryVideos: 3,
   popunderCooldownHours: 24,
-  weightSmartlink: 100,
-  weightPopunder: 120,
-  weightInterstitial: 90,
-  weightSocialBar: 70,
-  weightBanner: 40,
-  weightNative: 50,
 };
 
-export async function getPublicAdsConfig(): Promise<{
-  ads: MonetizationAd[];
-  settings: MonetizationSettings;
-}> {
-  try {
-    const [ads, settings] = await Promise.all([
-      prisma.adUnit.findMany({
-        where: { isActive: true },
-        orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
-      }),
-      prisma.adSetting.findFirst(),
-    ]);
+export const getPublicAdsConfig = cache(
+  async (): Promise<{
+    ads: MonetizationAd[];
+    settings: MonetizationSettings;
+  }> => {
+    const cacheKey = "public:ads:config";
 
-    return {
-      ads: ads.map((ad) => ({ ...ad, type: ad.type })),
-      settings: settings ? mapSettings(settings) : DEFAULT_AD_SETTINGS,
-    };
-  } catch {
-    return {
-      ads: [],
-      settings: DEFAULT_AD_SETTINGS,
-    };
-  }
-}
+    return getCachedData(
+      cacheKey,
+      async () => {
+        try {
+          const [ads, settings] = await Promise.all([
+            prisma.adUnit.findMany({
+              where: { isActive: true },
+              orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
+            }),
+            prisma.adSetting.findFirst(),
+          ]);
+
+          return {
+            ads: ads.map((ad) => ({ ...ad, type: ad.type })),
+            settings: settings ? mapSettings(settings) : DEFAULT_AD_SETTINGS,
+          };
+        } catch {
+          return {
+            ads: [],
+            settings: DEFAULT_AD_SETTINGS,
+          };
+        }
+      },
+      CACHE_TTL.MEDIUM,
+    );
+  },
+);
 
 function mapSettings(settings: {
   popunderEnabled: boolean;
@@ -63,12 +68,6 @@ function mapSettings(settings: {
   interstitialGapSeconds: number;
   interstitialEveryVideos: number;
   popunderCooldownHours: number;
-  weightSmartlink: number;
-  weightPopunder: number;
-  weightInterstitial: number;
-  weightSocialBar: number;
-  weightBanner: number;
-  weightNative: number;
 }): MonetizationSettings {
   return settings;
 }

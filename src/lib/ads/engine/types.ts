@@ -10,6 +10,14 @@ export type MonetizationEvent =
   | "timeupdate"
   | "next-video";
 
+export type MonetizationReason =
+  | MonetizationEvent
+  | "smartlink-enforcement"
+  | "watch-time"
+  | "banner-display"
+  | "native-display"
+  | "social-display";
+
 export type MonetizationAd = {
   id: string;
   type: AdType;
@@ -22,6 +30,16 @@ export type MonetizationAd = {
   createdAt?: string | Date;
   cooldownSeconds?: number | null;
   frequencyCap?: number | null;
+};
+
+export type MonetizationResult = {
+  type: AdType;
+  adId: string;
+  name: string;
+  reason: MonetizationReason;
+  firedAt: number;
+  // Add script to result for easy access
+  script?: string;
 };
 
 export type MonetizationSettings = {
@@ -39,19 +57,4 @@ export type MonetizationSettings = {
   interstitialEveryVideos: number;
 
   popunderCooldownHours: number;
-
-  weightSmartlink: number;
-  weightPopunder: number;
-  weightInterstitial: number;
-  weightSocialBar: number;
-  weightBanner: number;
-  weightNative: number;
-};
-
-export type MonetizationResult = {
-  type: AdType;
-  adId: string;
-  name: string;
-  reason: MonetizationEvent | "smartlink-enforcement" | "watch-time";
-  firedAt: number;
 };

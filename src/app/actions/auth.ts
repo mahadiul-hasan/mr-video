@@ -33,10 +33,7 @@ export async function loginAction(_: LoginState, formData: FormData) {
         error: `Too many login attempts. Please try again in ${retryAfter} seconds.`,
       };
     }
-  } catch (error) {
-    console.error("Rate limit error:", error);
-    // Fail open - allow login if rate limit check fails
-  }
+  } catch (error) {}
 
   const parsed = schema.safeParse({
     username: formData.get("username"),
@@ -85,7 +82,6 @@ export async function loginAction(_: LoginState, formData: FormData) {
 
     return { success: true };
   } catch (error) {
-    console.error("Login error:", error);
     return { error: "An unexpected error occurred. Please try again." };
   }
 }

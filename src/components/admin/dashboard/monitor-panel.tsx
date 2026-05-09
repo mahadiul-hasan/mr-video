@@ -22,7 +22,6 @@ export function MonitorPanel() {
         setMetrics(result.data);
       }
     } catch (error) {
-      console.error("Failed to load metrics:", error);
     } finally {
       setLoading(false);
     }

@@ -45,7 +45,6 @@ export function CachePanel() {
         setStats(result.data);
       }
     } catch (error) {
-      console.error("Failed to load cache stats:", error);
     } finally {
       setLoading(false);
     }
