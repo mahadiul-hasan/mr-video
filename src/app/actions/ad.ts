@@ -5,6 +5,8 @@ import prisma from "@/lib/prisma";
 import { requireAdmin } from "@/lib/requireAdmin";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { invalidateCachePattern } from "@/lib/cache/cache-utils";
+import { revalidatePublicCaches } from "@/lib/videos/public-videos";
 
 //
 // ---------------- AD UNITS ----------------
@@ -67,6 +69,21 @@ const settingsSchema = z.object({
 
 const idSchema = z.string().uuid();
 
+// Helper function to invalidate all ad-related caches
+async function invalidateAllAdCaches() {
+  // Invalidate public ad caches (if you have any ad-specific caches)
+  await invalidateCachePattern("public:ads:*");
+  await invalidateCachePattern("public:ad-settings:*");
+
+  // Invalidate public caches (home page, video pages, etc.)
+  await revalidatePublicCaches();
+
+  // Revalidate Next.js paths
+  revalidatePath("/admin/ads");
+  revalidatePath("/admin/ads/settings");
+  revalidatePath("/");
+}
+
 export async function createAd(data: CreateAdInput) {
   await requireAdmin();
   const parsed = createAdSchema.parse(data);
@@ -83,8 +100,9 @@ export async function createAd(data: CreateAdInput) {
     },
   });
 
-  revalidatePath("/admin/ads");
-  revalidatePath("/");
+  // Invalidate all ad caches
+  await invalidateAllAdCaches();
+
   return res;
 }
 
@@ -113,7 +131,9 @@ export async function updateAd(id: string, data: UpdateAdInput) {
           : (parsed.cooldownSeconds ?? undefined),
 
       frequencyCap:
-        parsed.frequencyCap === null ? null : (parsed.frequencyCap ?? undefined),
+        parsed.frequencyCap === null
+          ? null
+          : (parsed.frequencyCap ?? undefined),
 
       weight:
         parsed.weight === null
@@ -125,8 +145,9 @@ export async function updateAd(id: string, data: UpdateAdInput) {
     },
   });
 
-  revalidatePath("/admin/ads");
-  revalidatePath("/");
+  // Invalidate all ad caches
+  await invalidateAllAdCaches();
+
   return res;
 }
 
@@ -137,8 +158,9 @@ export async function deleteAd(id: string) {
     where: { id: parsedId },
   });
 
-  revalidatePath("/admin/ads");
-  revalidatePath("/");
+  // Invalidate all ad caches
+  await invalidateAllAdCaches();
+
   return res;
 }
 
@@ -163,7 +185,18 @@ const DEFAULT_SETTINGS = {
   popunderCooldownHours: 24,
 };
 
+// Cache ad settings (they don't change often)
+let cachedSettings: typeof DEFAULT_SETTINGS | null = null;
+let cacheTimestamp = 0;
+const CACHE_TTL = 60000; // 1 minute cache for settings
+
 export async function getAdSettings() {
+  // Check memory cache first (optional optimization)
+  const now = Date.now();
+  if (cachedSettings && now - cacheTimestamp < CACHE_TTL) {
+    return cachedSettings;
+  }
+
   let settings = await prisma.adSetting.findFirst();
 
   if (!settings) {
@@ -171,6 +204,10 @@ export async function getAdSettings() {
       data: DEFAULT_SETTINGS,
     });
   }
+
+  // Update memory cache
+  cachedSettings = settings;
+  cacheTimestamp = now;
 
   return settings;
 }
@@ -203,6 +240,35 @@ export async function updateAdSettings(data: Partial<typeof DEFAULT_SETTINGS>) {
     });
   }
 
+  // Clear memory cache
+  cachedSettings = null;
+  cacheTimestamp = 0;
+
+  // Invalidate all ad caches
+  await invalidateAllAdCaches();
+
+  // Revalidate specific paths
   revalidatePath("/admin/ads/settings");
   revalidatePath("/");
+}
+
+// Optional: Function to get active ads for a specific placement
+export async function getActiveAdsByPlacement(
+  placement: string,
+  type?: AdType,
+) {
+  const cacheKey = `public:ads:placement:${placement}:type:${type || "all"}`;
+
+  // You could use your getCachedData here if you import it
+  // For now, direct query with memory cache
+  const ads = await prisma.adUnit.findMany({
+    where: {
+      isActive: true,
+      placement: placement,
+      ...(type ? { type } : {}),
+    },
+    orderBy: [{ priority: "desc" }, { weight: "desc" }],
+  });
+
+  return ads;
 }

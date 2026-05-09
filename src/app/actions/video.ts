@@ -6,6 +6,14 @@ import prisma from "@/lib/prisma";
 import { requireAdmin } from "@/lib/requireAdmin";
 import { deleteVideoAsset } from "@/lib/storage/video-storage";
 import { slugify } from "@/lib/videos/slug";
+import {
+  revalidatePublicCaches,
+  revalidateVideoCache,
+  revalidateCategoryCache,
+  revalidateTagCache,
+  revalidateSearchCache,
+} from "@/lib/videos/public-videos";
+import { invalidateCachePattern } from "@/lib/cache/cache-utils";
 
 const videoFieldsSchema = z.object({
   title: z.string().trim().min(2).max(180),
@@ -24,7 +32,11 @@ const videoAssetSchema = z.object({
   providerId: z.string().trim().min(1).max(500),
   playbackUrl: z.url(),
   thumbnailUrl: z.url(),
-  duration: z.number().int().min(0).max(24 * 60 * 60),
+  duration: z
+    .number()
+    .int()
+    .min(0)
+    .max(24 * 60 * 60),
 });
 
 type VideoMetadataInput = z.input<typeof videoMetadataSchema>;
@@ -63,7 +75,13 @@ const getCachedVideos = unstable_cache(
               { title: { contains: search, mode: "insensitive" } },
               { slug: { contains: search, mode: "insensitive" } },
               { category: { name: { contains: search, mode: "insensitive" } } },
-              { tags: { some: { tag: { name: { contains: search, mode: "insensitive" } } } } },
+              {
+                tags: {
+                  some: {
+                    tag: { name: { contains: search, mode: "insensitive" } },
+                  },
+                },
+              },
             ],
           }
         : undefined,
@@ -86,7 +104,13 @@ const getCachedVideoCount = unstable_cache(
               { title: { contains: search, mode: "insensitive" } },
               { slug: { contains: search, mode: "insensitive" } },
               { category: { name: { contains: search, mode: "insensitive" } } },
-              { tags: { some: { tag: { name: { contains: search, mode: "insensitive" } } } } },
+              {
+                tags: {
+                  some: {
+                    tag: { name: { contains: search, mode: "insensitive" } },
+                  },
+                },
+              },
             ],
           }
         : undefined,
@@ -121,6 +145,35 @@ export async function getVideoFormOptions() {
   return { categories, tags };
 }
 
+// Enhanced function to invalidate all video-related caches
+async function invalidateAllVideoCaches(
+  slug?: string,
+  categoryId?: string,
+  tagIds?: string[],
+) {
+  // Invalidate public caches
+  await revalidatePublicCaches();
+
+  // Invalidate specific video cache
+  if (slug) {
+    await revalidateVideoCache(slug);
+  }
+
+  // Invalidate search cache
+  await revalidateSearchCache();
+
+  // Invalidate admin caches
+  await invalidateCachePattern("videos-list");
+  await invalidateCachePattern("videos-count");
+
+  // Revalidate Next.js paths
+  revalidatePath("/admin/videos");
+  revalidatePath("/");
+  if (slug) {
+    revalidatePath(`/watch/${slug}`);
+  }
+}
+
 export async function createVideoFromAsset(
   data: VideoMetadataInput,
   assetData: VideoAssetInput,
@@ -149,7 +202,13 @@ export async function createVideoFromAsset(
     },
   });
 
-  revalidateVideoPaths(fields.slug);
+  // Invalidate all caches
+  await invalidateAllVideoCaches(
+    fields.slug,
+    fields.categoryId || undefined,
+    fields.tagIds,
+  );
+
   return result;
 }
 
@@ -166,7 +225,14 @@ export async function updateVideoFromAsset(
 
   const current = await prisma.video.findUniqueOrThrow({
     where: { id: parsedId },
-    select: { cloudinaryId: true, slug: true },
+    select: {
+      cloudinaryId: true,
+      slug: true,
+      categoryId: true,
+      tags: {
+        include: { tag: true },
+      },
+    },
   });
 
   const result = await prisma.video.update({
@@ -196,8 +262,18 @@ export async function updateVideoFromAsset(
 
   if (asset) await deleteVideoAsset(current.cloudinaryId);
 
-  revalidateVideoPaths(fields.slug);
-  revalidatePath(`/watch/${current.slug}`);
+  // Invalidate all caches
+  await invalidateAllVideoCaches(
+    fields.slug,
+    fields.categoryId || undefined,
+    fields.tagIds,
+  );
+
+  // Also invalidate old slug cache if changed
+  if (current.slug !== fields.slug) {
+    await invalidateAllVideoCaches(current.slug);
+  }
+
   return result;
 }
 
@@ -206,10 +282,19 @@ export async function deleteVideo(id: string) {
 
   const video = await prisma.video.delete({
     where: { id },
+    select: {
+      id: true,
+      slug: true,
+      cloudinaryId: true,
+      categoryId: true,
+    },
   });
 
   await deleteVideoAsset(video.cloudinaryId);
-  revalidateVideoPaths(video.slug);
+
+  // Invalidate all caches
+  await invalidateAllVideoCaches(video.slug, video.categoryId || undefined);
+
   return video;
 }
 
@@ -219,14 +304,26 @@ export async function bulkDeleteVideos(ids: string[]) {
   const parsedIds = z.array(z.string().min(1)).max(100).parse(ids);
   const videos = await prisma.video.findMany({
     where: { id: { in: parsedIds } },
-    select: { id: true, cloudinaryId: true, slug: true },
+    select: {
+      id: true,
+      cloudinaryId: true,
+      slug: true,
+      categoryId: true,
+    },
   });
 
   await prisma.video.deleteMany({
     where: { id: { in: videos.map((video) => video.id) } },
   });
 
-  await Promise.all(videos.map((video) => deleteVideoAsset(video.cloudinaryId)));
+  await Promise.all(
+    videos.map((video) => deleteVideoAsset(video.cloudinaryId)),
+  );
+
+  // Invalidate all caches (full reset)
+  await revalidatePublicCaches();
+  await invalidateCachePattern("videos-list");
+  await invalidateCachePattern("videos-count");
 
   revalidatePath("/admin/videos");
   revalidatePath("/");
@@ -235,6 +332,7 @@ export async function bulkDeleteVideos(ids: string[]) {
   return { count: videos.length };
 }
 
+// Helper function to revalidate video paths (kept for backward compatibility)
 function revalidateVideoPaths(slug: string) {
   revalidatePath("/admin/videos");
   revalidatePath("/");

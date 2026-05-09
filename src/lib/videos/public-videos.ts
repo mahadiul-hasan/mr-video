@@ -1,6 +1,12 @@
 import "server-only";
-
 import prisma from "@/lib/prisma";
+import {
+  getCachedData,
+  invalidateCachePattern,
+  CACHE_TTL,
+  CACHE_TAGS,
+} from "@/lib/cache/cache-utils";
+import { rateLimit } from "@/lib/rate-limit";
 
 export type PublicVideo = {
   id: string;
@@ -34,6 +40,10 @@ const publicVideoSelect = {
   },
 } as const;
 
+// ============================
+// PUBLIC VIDEO FUNCTIONS WITH CACHE
+// ============================
+
 export async function getPublicVideos({
   page = 1,
   limit = 24,
@@ -41,15 +51,22 @@ export async function getPublicVideos({
   page?: number;
   limit?: number;
 } = {}) {
-  const videos = await prisma.video.findMany({
-    where: { isPublished: true },
-    select: publicVideoSelect,
-    orderBy: { createdAt: "desc" },
-    skip: (page - 1) * limit,
-    take: limit,
-  });
+  const cacheKey = `public:videos:page:${page}:limit:${limit}`;
 
-  return videos.map(mapPublicVideo);
+  return getCachedData(
+    cacheKey,
+    async () => {
+      const videos = await prisma.video.findMany({
+        where: { isPublished: true },
+        select: publicVideoSelect,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      });
+      return videos.map(mapPublicVideo);
+    },
+    CACHE_TTL.LONG,
+  );
 }
 
 export async function searchPublicVideos({
@@ -63,33 +80,43 @@ export async function searchPublicVideos({
 }) {
   const search = query.trim();
 
-  const videos = await prisma.video.findMany({
-    where: {
-      isPublished: true,
-      ...(search
-        ? {
-            OR: [
-              { title: { contains: search, mode: "insensitive" } },
-              { description: { contains: search, mode: "insensitive" } },
-              { category: { name: { contains: search, mode: "insensitive" } } },
-              {
-                tags: {
-                  some: {
-                    tag: { name: { contains: search, mode: "insensitive" } },
-                  },
+  // Apply rate limiting for search
+  if (search) {
+    await rateLimit(`search:${search.substring(0, 50)}`, "SEARCH");
+  }
+
+  if (!search) return [];
+
+  const cacheKey = `public:search:${search}:page:${page}:limit:${limit}`;
+
+  return getCachedData(
+    cacheKey,
+    async () => {
+      const videos = await prisma.video.findMany({
+        where: {
+          isPublished: true,
+          OR: [
+            { title: { contains: search, mode: "insensitive" } },
+            { description: { contains: search, mode: "insensitive" } },
+            { category: { name: { contains: search, mode: "insensitive" } } },
+            {
+              tags: {
+                some: {
+                  tag: { name: { contains: search, mode: "insensitive" } },
                 },
               },
-            ],
-          }
-        : {}),
+            },
+          ],
+        },
+        select: publicVideoSelect,
+        orderBy: [{ views: "desc" }, { createdAt: "desc" }],
+        skip: (page - 1) * limit,
+        take: limit,
+      });
+      return videos.map(mapPublicVideo);
     },
-    select: publicVideoSelect,
-    orderBy: [{ views: "desc" }, { createdAt: "desc" }],
-    skip: (page - 1) * limit,
-    take: limit,
-  });
-
-  return videos.map(mapPublicVideo);
+    CACHE_TTL.MEDIUM, // Shorter TTL for search results
+  );
 }
 
 export async function getPublicVideosByCategory({
@@ -101,22 +128,30 @@ export async function getPublicVideosByCategory({
   page?: number;
   limit?: number;
 }) {
-  const category = await prisma.category.findUnique({
-    where: { slug },
-    select: { id: true, name: true, slug: true },
-  });
+  const cacheKey = `public:category:${slug}:page:${page}:limit:${limit}`;
 
-  if (!category) return null;
+  return getCachedData(
+    cacheKey,
+    async () => {
+      const category = await prisma.category.findUnique({
+        where: { slug },
+        select: { id: true, name: true, slug: true },
+      });
 
-  const videos = await prisma.video.findMany({
-    where: { isPublished: true, categoryId: category.id },
-    select: publicVideoSelect,
-    orderBy: { createdAt: "desc" },
-    skip: (page - 1) * limit,
-    take: limit,
-  });
+      if (!category) return null;
 
-  return { category, videos: videos.map(mapPublicVideo) };
+      const videos = await prisma.video.findMany({
+        where: { isPublished: true, categoryId: category.id },
+        select: publicVideoSelect,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      });
+
+      return { category, videos: videos.map(mapPublicVideo) };
+    },
+    CACHE_TTL.LONG,
+  );
 }
 
 export async function getPublicVideosByTag({
@@ -128,65 +163,96 @@ export async function getPublicVideosByTag({
   page?: number;
   limit?: number;
 }) {
-  const tag = await prisma.tag.findUnique({
-    where: { slug },
-    select: { id: true, name: true, slug: true },
-  });
+  const cacheKey = `public:tag:${slug}:page:${page}:limit:${limit}`;
 
-  if (!tag) return null;
+  return getCachedData(
+    cacheKey,
+    async () => {
+      const tag = await prisma.tag.findUnique({
+        where: { slug },
+        select: { id: true, name: true, slug: true },
+      });
 
-  const videos = await prisma.video.findMany({
-    where: {
-      isPublished: true,
-      tags: { some: { tagId: tag.id } },
+      if (!tag) return null;
+
+      const videos = await prisma.video.findMany({
+        where: {
+          isPublished: true,
+          tags: { some: { tagId: tag.id } },
+        },
+        select: publicVideoSelect,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      });
+
+      return { tag, videos: videos.map(mapPublicVideo) };
     },
-    select: publicVideoSelect,
-    orderBy: { createdAt: "desc" },
-    skip: (page - 1) * limit,
-    take: limit,
-  });
-
-  return { tag, videos: videos.map(mapPublicVideo) };
+    CACHE_TTL.LONG,
+  );
 }
 
 export async function getPublicCategories({ limit }: { limit?: number } = {}) {
-  return prisma.category.findMany({
-    where: { videos: { some: { isPublished: true } } },
-    select: {
-      id: true,
-      name: true,
-      slug: true,
-      _count: { select: { videos: { where: { isPublished: true } } } },
+  const cacheKey = `public:categories:limit:${limit || "all"}`;
+
+  return getCachedData(
+    cacheKey,
+    async () => {
+      return prisma.category.findMany({
+        where: { videos: { some: { isPublished: true } } },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          _count: { select: { videos: { where: { isPublished: true } } } },
+        },
+        orderBy: { name: "asc" },
+        ...(limit ? { take: limit } : {}),
+      });
     },
-    orderBy: { name: "asc" },
-    ...(limit ? { take: limit } : {}),
-  });
+    CACHE_TTL.VERY_LONG,
+  );
 }
 
 export async function getPublicTags({ limit }: { limit?: number } = {}) {
-  return prisma.tag.findMany({
-    where: { videos: { some: { video: { isPublished: true } } } },
-    select: {
-      id: true,
-      name: true,
-      slug: true,
-      _count: { select: { videos: true } },
+  const cacheKey = `public:tags:limit:${limit || "all"}`;
+
+  return getCachedData(
+    cacheKey,
+    async () => {
+      return prisma.tag.findMany({
+        where: { videos: { some: { video: { isPublished: true } } } },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          _count: { select: { videos: true } },
+        },
+        orderBy: { name: "asc" },
+        ...(limit ? { take: limit } : {}),
+      });
     },
-    orderBy: { name: "asc" },
-    ...(limit ? { take: limit } : {}),
-  });
+    CACHE_TTL.VERY_LONG,
+  );
 }
 
 export async function getPublicVideoBySlug(slug: string) {
-  const video = await prisma.video.findFirst({
-    where: {
-      slug,
-      isPublished: true,
-    },
-    select: publicVideoSelect,
-  });
+  const cacheKey = `public:single-video:${slug}`;
 
-  return video ? mapPublicVideo(video) : null;
+  return getCachedData(
+    cacheKey,
+    async () => {
+      const video = await prisma.video.findFirst({
+        where: {
+          slug,
+          isPublished: true,
+        },
+        select: publicVideoSelect,
+      });
+      return video ? mapPublicVideo(video) : null;
+    },
+    CACHE_TTL.LONG,
+  );
 }
 
 export async function getRelatedPublicVideos({
@@ -198,21 +264,93 @@ export async function getRelatedPublicVideos({
   category?: string;
   limit?: number;
 }) {
-  const videos = await prisma.video.findMany({
-    where: {
-      isPublished: true,
-      slug: { not: slug },
-      ...(category && category !== "Uncategorized"
-        ? { category: { name: category } }
-        : {}),
-    },
-    select: publicVideoSelect,
-    orderBy: [{ views: "desc" }, { createdAt: "desc" }],
-    take: limit,
-  });
+  const cacheKey = `public:related:${slug}:category:${category || "none"}:limit:${limit}`;
 
-  return videos.map(mapPublicVideo);
+  return getCachedData(
+    cacheKey,
+    async () => {
+      const videos = await prisma.video.findMany({
+        where: {
+          isPublished: true,
+          slug: { not: slug },
+          ...(category && category !== "Uncategorized"
+            ? { category: { name: category } }
+            : {}),
+        },
+        select: publicVideoSelect,
+        orderBy: [{ views: "desc" }, { createdAt: "desc" }],
+        take: limit,
+      });
+      return videos.map(mapPublicVideo);
+    },
+    CACHE_TTL.MEDIUM,
+  );
 }
+
+// ============================
+// CACHE INVALIDATION HELPERS
+// ============================
+
+export async function revalidatePublicCaches() {
+  // Invalidate all public cache patterns
+  await invalidateCachePattern("public:*");
+
+  // Also invalidate specific tag patterns for Next.js
+  // (These would be used with revalidateTag if you're using fetch)
+  console.log("Public caches invalidated");
+}
+
+export async function revalidateVideoCache(slug: string) {
+  // Invalidate specific video caches
+  await invalidateCachePattern(`public:single-video:${slug}`);
+  await invalidateCachePattern(`public:related:${slug}:*`);
+  await invalidateCachePattern("public:videos:*");
+  await invalidateCachePattern("public:home:*");
+
+  console.log(`Video cache invalidated for: ${slug}`);
+}
+
+export async function revalidateCategoryCache(slug: string) {
+  await invalidateCachePattern(`public:category:${slug}:*`);
+  await invalidateCachePattern("public:categories:*");
+  await invalidateCachePattern("public:videos:*");
+
+  console.log(`Category cache invalidated for: ${slug}`);
+}
+
+export async function revalidateTagCache(slug: string) {
+  await invalidateCachePattern(`public:tag:${slug}:*`);
+  await invalidateCachePattern("public:tags:*");
+  await invalidateCachePattern("public:videos:*");
+
+  console.log(`Tag cache invalidated for: ${slug}`);
+}
+
+export async function revalidateSearchCache() {
+  await invalidateCachePattern("public:search:*");
+  console.log("Search cache invalidated");
+}
+
+// ============================
+// VIEW COUNTER (NO CACHE)
+// ============================
+
+export async function incrementVideoViews(slug: string) {
+  try {
+    await prisma.video.update({
+      where: { slug },
+      data: { views: { increment: 1 } },
+    });
+    // Invalidate video cache to show updated view count
+    await revalidateVideoCache(slug);
+  } catch (error) {
+    console.error(`Failed to increment views for ${slug}:`, error);
+  }
+}
+
+// ============================
+// HELPER FUNCTIONS
+// ============================
 
 function mapPublicVideo(video: {
   id: string;

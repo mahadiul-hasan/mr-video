@@ -10,24 +10,64 @@ import {
 const PAGE_SIZE = 12;
 
 export async function loadMoreHomeVideos(page: number) {
-  return getPublicVideos({ page, limit: PAGE_SIZE });
+  try {
+    return await getPublicVideos({ page, limit: PAGE_SIZE });
+  } catch (error) {
+    console.error(`Error loading home videos page ${page}:`, error);
+    return [];
+  }
 }
 
 export async function loadMoreSearchVideos(query: string, page: number) {
-  return searchPublicVideos({ query, page, limit: PAGE_SIZE });
+  if (!query || query.trim() === "") {
+    return [];
+  }
+
+  try {
+    return await searchPublicVideos({ query, page, limit: PAGE_SIZE });
+  } catch (error) {
+    console.error(
+      `Error loading search videos for "${query}" page ${page}:`,
+      error,
+    );
+    return [];
+  }
 }
 
 export async function loadMoreCategoryVideos(slug: string, page: number) {
-  const result = await getPublicVideosByCategory({
-    slug,
-    page,
-    limit: PAGE_SIZE,
-  });
+  if (!slug) {
+    return [];
+  }
 
-  return result?.videos ?? [];
+  try {
+    const result = await getPublicVideosByCategory({
+      slug,
+      page,
+      limit: PAGE_SIZE,
+    });
+    return result?.videos ?? [];
+  } catch (error) {
+    console.error(
+      `Error loading category videos for "${slug}" page ${page}:`,
+      error,
+    );
+    return [];
+  }
 }
 
 export async function loadMoreTagVideos(slug: string, page: number) {
-  const result = await getPublicVideosByTag({ slug, page, limit: PAGE_SIZE });
-  return result?.videos ?? [];
+  if (!slug) {
+    return [];
+  }
+
+  try {
+    const result = await getPublicVideosByTag({ slug, page, limit: PAGE_SIZE });
+    return result?.videos ?? [];
+  } catch (error) {
+    console.error(
+      `Error loading tag videos for "${slug}" page ${page}:`,
+      error,
+    );
+    return [];
+  }
 }
