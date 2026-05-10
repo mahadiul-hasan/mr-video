@@ -1,3 +1,4 @@
+// lib/cache/cache-utils.ts
 import { redis } from "@/lib/redis";
 
 // Cache TTL constants
@@ -8,23 +9,23 @@ export const CACHE_TTL = {
   VERY_LONG: 86400, // 24 hours
 } as const;
 
-// Cache tags for Next.js (for revalidateTag)
-export const CACHE_TAGS = {
+// Cache tags for pattern matching
+export const CACHE_PATTERNS = {
   PUBLIC: {
-    ALL_VIDEOS: "public:all-videos",
-    CATEGORY_VIDEOS: "public:category-videos",
-    TAG_VIDEOS: "public:tag-videos",
-    SINGLE_VIDEO: "public:single-video",
-    RELATED_VIDEOS: "public:related-videos",
-    SEARCH: "public:search",
-    CATEGORIES: "public:categories",
-    TAGS: "public:tags",
-    HOME: "public:home",
+    ALL_VIDEOS: "public:videos:*",
+    CATEGORY_VIDEOS: "public:category:*",
+    TAG_VIDEOS: "public:tag:*",
+    SINGLE_VIDEO: "public:single-video:*",
+    RELATED_VIDEOS: "public:related:*",
+    SEARCH: "public:search:*",
+    CATEGORIES: "public:categories:*",
+    TAGS: "public:tags:*",
+    HOME: "public:home:*",
   },
   ADMIN: {
-    VIDEOS: "admin:videos",
-    CATEGORIES: "admin:categories",
-    TAGS: "admin:tags",
+    VIDEOS: "admin:videos:*",
+    CATEGORIES: "admin:categories:*",
+    TAGS: "admin:tags:*",
   },
 } as const;
 
@@ -35,26 +36,30 @@ export async function getCachedData<T>(
   ttl: number = CACHE_TTL.LONG,
 ): Promise<T> {
   try {
-    // Try to get from Redis
-    const cached = await redis.get(key);
+    if (!redis || typeof redis.get !== "function") {
+      return await fetcher();
+    }
 
+    const cached = await redis.get(key);
     if (cached) {
       try {
         return JSON.parse(cached) as T;
       } catch (parseError) {}
     }
 
-    // Fetch fresh data
     const data = await fetcher();
 
-    // Store in Redis (only if data is not null/undefined)
     if (data !== null && data !== undefined) {
-      await redis.setex(key, ttl, JSON.stringify(data));
+      const dataToCache =
+        Array.isArray(data) && data.length === 0 ? null : data;
+      if (dataToCache) {
+        await redis.setex(key, ttl, JSON.stringify(dataToCache));
+      }
     }
 
     return data;
   } catch (error) {
-    return fetcher();
+    return await fetcher();
   }
 }
 
@@ -65,13 +70,16 @@ export async function setCachedData<T>(
   ttl: number = CACHE_TTL.LONG,
 ): Promise<void> {
   try {
-    await redis.setex(key, ttl, JSON.stringify(data));
+    if (redis && typeof redis.setex === "function") {
+      await redis.setex(key, ttl, JSON.stringify(data));
+    }
   } catch (error) {}
 }
 
 // Get cache without fallback
 export async function getCached<T>(key: string): Promise<T | null> {
   try {
+    if (!redis || typeof redis.get !== "function") return null;
     const cached = await redis.get(key);
     if (cached) {
       return JSON.parse(cached) as T;
@@ -85,6 +93,7 @@ export async function getCached<T>(key: string): Promise<T | null> {
 // Invalidate cache by pattern
 export async function invalidateCachePattern(pattern: string): Promise<void> {
   try {
+    if (!redis || typeof redis.keys !== "function") return;
     const keys = await redis.keys(pattern);
     if (keys.length > 0) {
       await redis.del(...keys);
@@ -104,6 +113,9 @@ export async function getCacheStats(): Promise<{
   hitRate: string;
 }> {
   try {
+    if (!redis) {
+      return { totalKeys: 0, memory: "0", hitRate: "0%" };
+    }
     const keys = await redis.keys("*");
     const memory = await redis.info("memory");
     const stats = await redis.info("stats");
@@ -133,6 +145,8 @@ export async function getCacheStats(): Promise<{
 // Clear all cache (use with caution)
 export async function clearAllCache(): Promise<void> {
   try {
-    await redis.flushall();
+    if (redis && typeof redis.flushall === "function") {
+      await redis.flushall();
+    }
   } catch (error) {}
 }

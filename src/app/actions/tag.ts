@@ -2,7 +2,6 @@
 
 import prisma from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
-import { unstable_cache } from "next/cache";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/requireAdmin";
 import { slugify } from "@/lib/videos/slug";
@@ -10,7 +9,12 @@ import {
   revalidatePublicCaches,
   revalidateTagCache,
 } from "@/lib/videos/public-videos";
-import { invalidateCachePattern } from "@/lib/cache/cache-utils";
+import {
+  getCachedData,
+  invalidateCachePattern,
+  CACHE_TTL,
+  CACHE_PATTERNS,
+} from "@/lib/cache/cache-utils";
 
 const tagSchema = z.object({
   name: z.string().trim().min(2).max(80),
@@ -20,50 +24,65 @@ const tagSchema = z.object({
 const idSchema = z.string().uuid();
 const idsSchema = z.array(idSchema).min(1).max(100);
 
-// ---------------- CACHE LIST ----------------
-const getCachedTags = unstable_cache(
-  async (page: number, limit: number, search: string) => {
-    const skip = (page - 1) * limit;
+// -------------------------
+// PUBLIC READ FUNCTIONS WITH REDIS CACHE
+// -------------------------
+export async function getTags({
+  page = 1,
+  limit = 10,
+  search = "",
+}: {
+  page?: number;
+  limit?: number;
+  search?: string;
+}) {
+  const cacheKey = `admin:tags:page:${page}:limit:${limit}:search:${search || "none"}`;
 
-    return prisma.tag.findMany({
-      where: search
-        ? {
-            name: {
-              contains: search,
-              mode: "insensitive",
-            },
-          }
-        : undefined,
+  return getCachedData(
+    cacheKey,
+    async () => {
+      const skip = (page - 1) * limit;
 
-      orderBy: {
-        createdAt: "desc",
-      },
+      return prisma.tag.findMany({
+        where: search
+          ? {
+              name: {
+                contains: search,
+                mode: "insensitive",
+              },
+            }
+          : undefined,
+        orderBy: {
+          createdAt: "desc",
+        },
+        skip,
+        take: limit,
+      });
+    },
+    CACHE_TTL.MEDIUM, // 5 minutes for admin
+  );
+}
 
-      skip,
-      take: limit,
-    });
-  },
-  ["tags-list"],
-  { revalidate: 3600 },
-);
+export async function getTagCount(search = "") {
+  const cacheKey = `admin:tags:count:search:${search || "none"}`;
 
-// ---------------- CACHE COUNT ----------------
-const getCachedTagCount = unstable_cache(
-  async (search: string) => {
-    return prisma.tag.count({
-      where: search
-        ? {
-            name: {
-              contains: search,
-              mode: "insensitive",
-            },
-          }
-        : undefined,
-    });
-  },
-  ["tags-count"],
-  { revalidate: 3600 },
-);
+  return getCachedData(
+    cacheKey,
+    async () => {
+      return prisma.tag.count({
+        where: search
+          ? {
+              name: {
+                contains: search,
+                mode: "insensitive",
+              },
+            }
+          : undefined,
+      });
+    },
+    CACHE_TTL.MEDIUM,
+  );
+}
 
 // Helper function to invalidate all tag-related caches
 async function invalidateAllTagCaches(slug?: string) {
@@ -76,8 +95,8 @@ async function invalidateAllTagCaches(slug?: string) {
   await revalidatePublicCaches();
 
   // Invalidate admin caches
-  await invalidateCachePattern("tags-list");
-  await invalidateCachePattern("tags-count");
+  await invalidateCachePattern(CACHE_PATTERNS.ADMIN.TAGS);
+  await invalidateCachePattern("admin:tags:*");
 
   // Revalidate Next.js paths
   revalidatePath("/admin/tags");
@@ -85,24 +104,45 @@ async function invalidateAllTagCaches(slug?: string) {
   revalidatePath("/tags");
 }
 
-// ---------------- READ ----------------
-export async function getTags({
-  page = 1,
-  limit = 10,
-  search = "",
-}: {
-  page?: number;
-  limit?: number;
-  search?: string;
-}) {
-  return getCachedTags(page, limit, search);
+// Helper function to check which tags are in use (for UI feedback)
+export async function getTagsWithVideoReferences(tagIds: string[]) {
+  const tagsWithVideos = await prisma.videoTag.groupBy({
+    by: ["tagId"],
+    where: {
+      tagId: { in: tagIds },
+    },
+    _count: {
+      videoId: true,
+    },
+  });
+
+  const referencedTagIds = new Set(tagsWithVideos.map((item) => item.tagId));
+
+  // Get detailed info for referenced tags
+  const referencedTags = await prisma.tag.findMany({
+    where: {
+      id: { in: Array.from(referencedTagIds) },
+    },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+    },
+  });
+
+  // Attach video count
+  const tagsWithCounts = referencedTags.map((tag) => ({
+    ...tag,
+    videoCount:
+      tagsWithVideos.find((tv) => tv.tagId === tag.id)?._count.videoId || 0,
+  }));
+
+  return tagsWithCounts;
 }
 
-export async function getTagCount(search = "") {
-  return getCachedTagCount(search);
-}
-
-// ---------------- WRITE ----------------
+// -------------------------
+// MUTATIONS
+// -------------------------
 export async function createTag(data: { name: string; slug: string }) {
   await requireAdmin();
   const parsed = tagSchema.parse(data);
@@ -154,46 +194,41 @@ export async function updateTag(
   return result;
 }
 
-export async function deleteTag(id: string) {
-  await requireAdmin();
-  const parsedId = idSchema.parse(id);
-
-  // Get tag slug before deletion
-  const tag = await prisma.tag.findUnique({
-    where: { id: parsedId },
-    select: { slug: true },
-  });
-
-  const result = await prisma.tag.delete({
-    where: { id: parsedId },
-  });
-
-  // Invalidate tag caches
-  if (tag?.slug) {
-    await invalidateAllTagCaches(tag.slug);
-  }
-
-  return result;
-}
-
 export async function bulkDeleteTags(ids: string[]) {
   await requireAdmin();
   const parsedIds = idsSchema.parse(ids);
 
-  // Get all tag slugs before deletion
-  const tags = await prisma.tag.findMany({
-    where: { id: { in: parsedIds } },
-    select: { slug: true },
+  // Check which tags have video references (for user feedback)
+  const tagsInUse = await getTagsWithVideoReferences(parsedIds);
+  const deletableIds = parsedIds.filter(
+    (id) => !tagsInUse.some((tag) => tag.id === id),
+  );
+
+  if (deletableIds.length === 0) {
+    return {
+      success: false,
+      error: "TAGS_IN_USE",
+      message: `Cannot delete ${parsedIds.length} tag(s) that are associated with videos. Please remove tags from videos first.`,
+      nonDeletableTags: tagsInUse,
+      deletedCount: 0,
+    };
+  }
+
+  // Get slugs for deletable tags before deletion
+  const deletableTags = await prisma.tag.findMany({
+    where: { id: { in: deletableIds } },
+    select: { slug: true, name: true },
   });
 
+  // Delete tags - VideoTag entries will be automatically deleted due to cascade
   const result = await prisma.tag.deleteMany({
     where: {
-      id: { in: parsedIds },
+      id: { in: deletableIds },
     },
   });
 
-  // Invalidate all tag caches
-  for (const tag of tags) {
+  // Invalidate caches for deleted tags
+  for (const tag of deletableTags) {
     if (tag.slug) {
       await invalidateAllTagCaches(tag.slug);
     }
@@ -202,5 +237,66 @@ export async function bulkDeleteTags(ids: string[]) {
   // Also do a full public cache reset to be safe
   await revalidatePublicCaches();
 
-  return result;
+  return {
+    success: true,
+    deletedCount: result.count,
+    deletedTags: deletableTags.map((t) => t.name),
+    nonDeletableTags: tagsInUse,
+  };
+}
+
+export async function deleteTag(id: string) {
+  await requireAdmin();
+  const parsedId = idSchema.parse(id);
+
+  // Check if tag has video references
+  const tagsInUse = await getTagsWithVideoReferences([parsedId]);
+
+  if (tagsInUse.length > 0) {
+    return {
+      success: false,
+      error: "TAG_IN_USE",
+      message: `Cannot delete tag "${tagsInUse[0].name}" because it is associated with ${tagsInUse[0].videoCount} video(s). Please remove the tag from all videos first.`,
+    };
+  }
+
+  // Get tag info before deletion
+  const tag = await prisma.tag.findUnique({
+    where: { id: parsedId },
+    select: { slug: true, name: true },
+  });
+
+  if (!tag) {
+    return {
+      success: false,
+      error: "NOT_FOUND",
+      message: "Tag not found",
+    };
+  }
+
+  // Delete tag - VideoTag entries will be automatically deleted
+  await prisma.tag.delete({
+    where: { id: parsedId },
+  });
+
+  // Invalidate tag caches
+  await invalidateAllTagCaches(tag.slug);
+
+  return {
+    success: true,
+    deletedTag: tag.name,
+  };
+}
+
+// Additional helper for checking tag usage (for UI)
+export async function checkTagUsage(tagId: string) {
+  const usage = await prisma.videoTag.count({
+    where: { tagId },
+  });
+
+  return {
+    tagId,
+    videoCount: usage,
+    hasVideos: usage > 0,
+  };
 }

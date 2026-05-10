@@ -75,13 +75,12 @@ model VideoTag {
   videoId String
   tagId   String
 
-  video   Video @relation(fields: [videoId], references: [id])
-  tag     Tag   @relation(fields: [tagId], references: [id])
+  video   Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  tag     Tag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
 
   @@id([videoId, tagId])
-
   @@index([tagId])
   @@index([videoId])
 }

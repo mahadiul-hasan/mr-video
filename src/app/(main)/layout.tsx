@@ -1,8 +1,12 @@
+// app/(main)/layout.tsx or wherever your MainLayout is
 import { SiteFooter } from "@/components/site/site-footer";
 import { SiteHeader } from "@/components/site/site-header";
 import { AdProvider } from "@/components/providers/ad-provider";
 import { AdOverlay } from "@/components/video/ad-overlay";
-import { getPublicCategories, getPublicTags } from "@/lib/videos/public-videos";
+import {
+  getPublicCategoriesForHeader,
+  getPublicTagsForHeader,
+} from "@/lib/videos/public-videos";
 import { getPublicAdsConfig } from "@/lib/ads/public-ads";
 
 export default async function MainLayout({
@@ -11,16 +15,16 @@ export default async function MainLayout({
   children: React.ReactNode;
 }) {
   const [categories, tags, { ads, settings }] = await Promise.all([
-    getPublicCategories({ limit: 8 }),
-    getPublicTags({ limit: 8 }),
+    getPublicCategoriesForHeader({ limit: 8 }),
+    getPublicTagsForHeader({ limit: 8 }),
     getPublicAdsConfig(),
   ]);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen flex flex-col bg-background">
       <AdProvider ads={ads} settings={settings}>
         <SiteHeader categories={categories} tags={tags} />
-        {children}
+        <main className="flex-1">{children}</main>
         <SiteFooter />
         <AdOverlay />
       </AdProvider>

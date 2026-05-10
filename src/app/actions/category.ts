@@ -2,7 +2,6 @@
 
 import prisma from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
-import { unstable_cache } from "next/cache";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/requireAdmin";
 import { slugify } from "@/lib/videos/slug";
@@ -10,7 +9,12 @@ import {
   revalidatePublicCaches,
   revalidateCategoryCache,
 } from "@/lib/videos/public-videos";
-import { invalidateCachePattern } from "@/lib/cache/cache-utils";
+import {
+  getCachedData,
+  invalidateCachePattern,
+  CACHE_TTL,
+  CACHE_PATTERNS,
+} from "@/lib/cache/cache-utils";
 
 const categorySchema = z.object({
   name: z.string().trim().min(2).max(80),
@@ -21,80 +25,7 @@ const idSchema = z.string().uuid();
 const idsSchema = z.array(idSchema).min(1).max(100);
 
 // -------------------------
-// CACHE KEY: CATEGORY LIST
-// -------------------------
-const getCachedCategories = unstable_cache(
-  async (page: number, limit: number, search: string) => {
-    const skip = (page - 1) * limit;
-
-    return prisma.category.findMany({
-      where: search
-        ? {
-            name: {
-              contains: search,
-              mode: "insensitive",
-            },
-          }
-        : undefined,
-
-      orderBy: {
-        createdAt: "desc",
-      },
-
-      skip,
-      take: limit,
-    });
-  },
-  ["categories-list"],
-  {
-    revalidate: 3600, // 1 hour
-  },
-);
-
-// -------------------------
-// CACHE KEY: COUNT
-// -------------------------
-const getCachedCategoryCount = unstable_cache(
-  async (search: string) => {
-    return prisma.category.count({
-      where: search
-        ? {
-            name: {
-              contains: search,
-              mode: "insensitive",
-            },
-          }
-        : undefined,
-    });
-  },
-  ["categories-count"],
-  {
-    revalidate: 3600,
-  },
-);
-
-// Helper function to invalidate all category-related caches
-async function invalidateAllCategoryCaches(slug?: string) {
-  // Invalidate public category caches
-  if (slug) {
-    await revalidateCategoryCache(slug);
-  }
-
-  // Invalidate public caches (videos, home, etc.)
-  await revalidatePublicCaches();
-
-  // Invalidate admin caches
-  await invalidateCachePattern("categories-list");
-  await invalidateCachePattern("categories-count");
-
-  // Revalidate Next.js paths
-  revalidatePath("/admin/categories");
-  revalidatePath("/");
-  revalidatePath("/categories");
-}
-
-// -------------------------
-// PUBLIC READ FUNCTIONS
+// PUBLIC READ FUNCTIONS WITH REDIS CACHE
 // -------------------------
 export async function getCategories({
   page = 1,
@@ -105,15 +36,74 @@ export async function getCategories({
   limit?: number;
   search?: string;
 }) {
-  return getCachedCategories(page, limit, search);
+  const cacheKey = `admin:categories:page:${page}:limit:${limit}:search:${search || "none"}`;
+
+  return getCachedData(
+    cacheKey,
+    async () => {
+      const skip = (page - 1) * limit;
+
+      return prisma.category.findMany({
+        where: search
+          ? {
+              name: {
+                contains: search,
+                mode: "insensitive",
+              },
+            }
+          : undefined,
+        orderBy: {
+          createdAt: "desc",
+        },
+        skip,
+        take: limit,
+      });
+    },
+    CACHE_TTL.MEDIUM, // 5 minutes for admin
+  );
 }
 
 export async function getCategoryCount(search = "") {
-  return getCachedCategoryCount(search);
+  const cacheKey = `admin:categories:count:search:${search || "none"}`;
+
+  return getCachedData(
+    cacheKey,
+    async () => {
+      return prisma.category.count({
+        where: search
+          ? {
+              name: {
+                contains: search,
+                mode: "insensitive",
+              },
+            }
+          : undefined,
+      });
+    },
+    CACHE_TTL.MEDIUM,
+  );
+}
+
+// Helper function to invalidate all category-related caches
+async function invalidateAllCategoryCaches(slug?: string) {
+  // Invalidate public caches
+  if (slug) {
+    await revalidateCategoryCache(slug);
+  }
+  await revalidatePublicCaches();
+
+  // Invalidate admin caches
+  await invalidateCachePattern(CACHE_PATTERNS.ADMIN.CATEGORIES);
+  await invalidateCachePattern("admin:categories:*");
+
+  // Revalidate Next.js paths
+  revalidatePath("/admin/categories");
+  revalidatePath("/");
+  revalidatePath("/categories");
 }
 
 // -------------------------
-// MUTATIONS (INVALIDATE CACHE)
+// MUTATIONS
 // -------------------------
 export async function createCategory(data: { name: string; slug: string }) {
   await requireAdmin();
@@ -127,7 +117,6 @@ export async function createCategory(data: { name: string; slug: string }) {
     },
   });
 
-  // Invalidate all category caches
   await invalidateAllCategoryCaches(slug);
 
   return result;
@@ -141,7 +130,6 @@ export async function updateCategory(
   const parsedId = idSchema.parse(id);
   const parsed = categorySchema.partial().parse(data);
 
-  // Get current category to know old slug
   const currentCategory = await prisma.category.findUnique({
     where: { id: parsedId },
     select: { slug: true },
@@ -159,7 +147,6 @@ export async function updateCategory(
     },
   });
 
-  // Invalidate old and new category caches
   if (currentCategory?.slug) {
     await invalidateAllCategoryCaches(currentCategory.slug);
   }
@@ -172,7 +159,6 @@ export async function deleteCategory(id: string) {
   await requireAdmin();
   const parsedId = idSchema.parse(id);
 
-  // Get category slug before deletion
   const category = await prisma.category.findUnique({
     where: { id: parsedId },
     select: { slug: true },
@@ -182,7 +168,6 @@ export async function deleteCategory(id: string) {
     where: { id: parsedId },
   });
 
-  // Invalidate category caches
   if (category?.slug) {
     await invalidateAllCategoryCaches(category.slug);
   }
@@ -194,7 +179,6 @@ export async function bulkDeleteCategories(ids: string[]) {
   await requireAdmin();
   const parsedIds = idsSchema.parse(ids);
 
-  // Get all category slugs before deletion
   const categories = await prisma.category.findMany({
     where: { id: { in: parsedIds } },
     select: { slug: true },
@@ -206,14 +190,12 @@ export async function bulkDeleteCategories(ids: string[]) {
     },
   });
 
-  // Invalidate all category caches
   for (const category of categories) {
     if (category.slug) {
       await invalidateAllCategoryCaches(category.slug);
     }
   }
 
-  // Also do a full public cache reset to be safe
   await revalidatePublicCaches();
 
   return result;

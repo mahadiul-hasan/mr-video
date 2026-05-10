@@ -7,6 +7,16 @@ import { deleteTag, bulkDeleteTags } from "@/app/actions/tag";
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 import TagForm from "./tag-form";
 import DeleteDialog from "@/components/ui/delete-dialog";
@@ -36,6 +46,19 @@ export default function TagTable({
 
   const [editItem, setEditItem] = useState<Tag | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  // Add this state for the alert dialog
+  const [alertDialog, setAlertDialog] = useState<{
+    open: boolean;
+    title: string;
+    message: string;
+    type: "error" | "warning" | "success";
+  }>({
+    open: false,
+    title: "",
+    message: "",
+    type: "error",
+  });
 
   const limit = 10;
   const totalPages = Math.ceil(total / limit);
@@ -68,9 +91,28 @@ export default function TagTable({
   // BULK DELETE
   function handleBulkDelete() {
     startTransition(async () => {
-      await bulkDeleteTags(selected);
-      setSelected([]);
-      router.refresh();
+      try {
+        const result = await bulkDeleteTags(selected);
+
+        // Show success message
+        setAlertDialog({
+          open: true,
+          title: "Success",
+          type: "success",
+          message: `Successfully deleted ${selected.length} tag(s) and removed them from all videos.`,
+        });
+
+        setSelected([]);
+        router.refresh();
+      } catch (error) {
+        setAlertDialog({
+          open: true,
+          title: "Error",
+          type: "error",
+          message:
+            error instanceof Error ? error.message : "Failed to delete tags",
+        });
+      }
     });
   }
 
@@ -79,9 +121,28 @@ export default function TagTable({
     if (!deleteId) return;
 
     startTransition(async () => {
-      await deleteTag(deleteId);
-      setDeleteId(null);
-      router.refresh();
+      try {
+        await deleteTag(deleteId);
+
+        setAlertDialog({
+          open: true,
+          title: "Success",
+          type: "success",
+          message: "Tag deleted successfully and removed from all videos.",
+        });
+
+        setDeleteId(null);
+        router.refresh();
+      } catch (error) {
+        setAlertDialog({
+          open: true,
+          title: "Error",
+          type: "error",
+          message:
+            error instanceof Error ? error.message : "Failed to delete tag",
+        });
+        setDeleteId(null);
+      }
     });
   }
 
@@ -132,7 +193,7 @@ export default function TagTable({
             onClick={handleBulkDelete}
             disabled={isPending}
           >
-            Delete ({selected.length})
+            {isPending ? "Deleting..." : `Delete (${selected.length})`}
           </Button>
         )}
       </div>
@@ -149,7 +210,6 @@ export default function TagTable({
                   onChange={toggleSelectAll}
                 />
               </th>
-
               <th className="p-2 text-left">Name</th>
               <th className="p-2 text-left">Slug</th>
               <th className="p-2 text-right">Actions</th>
@@ -166,10 +226,8 @@ export default function TagTable({
                     onChange={() => toggleSelect(tag.id)}
                   />
                 </td>
-
                 <td className="p-2">{tag.name}</td>
                 <td className="p-2 text-muted-foreground">{tag.slug}</td>
-
                 <td className="p-2 text-right flex gap-2 justify-end">
                   <Button
                     size="sm"
@@ -208,13 +266,41 @@ export default function TagTable({
         </div>
       )}
 
-      {/* DELETE CONFIRM (REUSED) */}
+      {/* DELETE CONFIRM */}
       <DeleteDialog
         open={!!deleteId}
         onOpenChange={() => setDeleteId(null)}
         loading={isPending}
         onConfirm={handleDelete}
       />
+
+      {/* ALERT DIALOG FOR FEEDBACK */}
+      <AlertDialog
+        open={alertDialog.open}
+        onOpenChange={(open) => setAlertDialog({ ...alertDialog, open })}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle
+              className={
+                alertDialog.type === "error"
+                  ? "text-destructive"
+                  : alertDialog.type === "warning"
+                    ? "text-yellow-600"
+                    : "text-green-600"
+              }
+            >
+              {alertDialog.title}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {alertDialog.message}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction>OK</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

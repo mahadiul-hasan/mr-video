@@ -34,7 +34,7 @@ export default function AdminBreadcrumb() {
           <BreadcrumbLink href="/admin/dashboard">Dashboard</BreadcrumbLink>
         </BreadcrumbItem>
 
-        <BreadcrumbSeparator className="hidden md:block align-middle" />
+        <BreadcrumbSeparator className="hidden md:block" />
 
         <BreadcrumbItem>
           <BreadcrumbPage>{title}</BreadcrumbPage>

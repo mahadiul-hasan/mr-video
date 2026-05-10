@@ -1,27 +1,25 @@
+// app/admin/dashboard/page.tsx
 import { Suspense } from "react";
 import { requireAdmin } from "@/lib/requireAdmin";
-import { Skeleton } from "@/components/ui/skeleton";
-import { MonitorPanel } from "@/components/admin/dashboard/monitor-panel";
-import { CachePanel } from "@/components/admin/dashboard/cache-panel";
+import { SystemMetricsCard } from "@/components/admin/dashboard/system-metrics-card";
+import { CacheStatsCard } from "@/components/admin/dashboard/cache-stats-card";
 
 export default async function AdminDashboardPage() {
+  // Verify admin access on the server
   await requireAdmin();
 
   return (
-    <div className="space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-bold">Admin Dashboard</h1>
-        <p className="text-sm text-muted-foreground">
-          System monitoring and cache management
-        </p>
+    <div className="container mx-auto py-8 space-y-8">
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold">Admin Dashboard</h1>
       </div>
 
-      <Suspense fallback={<Skeleton className="h-64 w-full" />}>
-        <MonitorPanel />
+      <Suspense fallback={<div>Loading system metrics...</div>}>
+        <SystemMetricsCard />
       </Suspense>
 
-      <Suspense fallback={<Skeleton className="h-96 w-full" />}>
-        <CachePanel />
+      <Suspense fallback={<div>Loading cache statistics...</div>}>
+        <CacheStatsCard />
       </Suspense>
     </div>
   );

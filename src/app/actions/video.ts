@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath, unstable_cache } from "next/cache";
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { requireAdmin } from "@/lib/requireAdmin";
@@ -13,7 +13,12 @@ import {
   revalidateTagCache,
   revalidateSearchCache,
 } from "@/lib/videos/public-videos";
-import { invalidateCachePattern } from "@/lib/cache/cache-utils";
+import {
+  getCachedData,
+  invalidateCachePattern,
+  CACHE_TTL,
+  CACHE_PATTERNS,
+} from "@/lib/cache/cache-utils";
 
 const videoFieldsSchema = z.object({
   title: z.string().trim().min(2).max(180),
@@ -64,62 +69,9 @@ const videoInclude = {
   },
 } as const;
 
-const getCachedVideos = unstable_cache(
-  async (page: number, limit: number, search: string) => {
-    const skip = (page - 1) * limit;
-
-    return prisma.video.findMany({
-      where: search
-        ? {
-            OR: [
-              { title: { contains: search, mode: "insensitive" } },
-              { slug: { contains: search, mode: "insensitive" } },
-              { category: { name: { contains: search, mode: "insensitive" } } },
-              {
-                tags: {
-                  some: {
-                    tag: { name: { contains: search, mode: "insensitive" } },
-                  },
-                },
-              },
-            ],
-          }
-        : undefined,
-      include: videoInclude,
-      orderBy: { createdAt: "desc" },
-      skip,
-      take: limit,
-    });
-  },
-  ["videos-list"],
-  { revalidate: 3600 },
-);
-
-const getCachedVideoCount = unstable_cache(
-  async (search: string) => {
-    return prisma.video.count({
-      where: search
-        ? {
-            OR: [
-              { title: { contains: search, mode: "insensitive" } },
-              { slug: { contains: search, mode: "insensitive" } },
-              { category: { name: { contains: search, mode: "insensitive" } } },
-              {
-                tags: {
-                  some: {
-                    tag: { name: { contains: search, mode: "insensitive" } },
-                  },
-                },
-              },
-            ],
-          }
-        : undefined,
-    });
-  },
-  ["videos-count"],
-  { revalidate: 3600 },
-);
-
+// -------------------------
+// PUBLIC READ FUNCTIONS WITH REDIS CACHE
+// -------------------------
 export async function getVideos({
   page = 1,
   limit = 10,
@@ -129,20 +81,88 @@ export async function getVideos({
   limit?: number;
   search?: string;
 }) {
-  return getCachedVideos(page, limit, search);
+  const cacheKey = `admin:videos:page:${page}:limit:${limit}:search:${search || "none"}`;
+
+  return getCachedData(
+    cacheKey,
+    async () => {
+      const skip = (page - 1) * limit;
+
+      return prisma.video.findMany({
+        where: search
+          ? {
+              OR: [
+                { title: { contains: search, mode: "insensitive" } },
+                { slug: { contains: search, mode: "insensitive" } },
+                {
+                  category: { name: { contains: search, mode: "insensitive" } },
+                },
+                {
+                  tags: {
+                    some: {
+                      tag: { name: { contains: search, mode: "insensitive" } },
+                    },
+                  },
+                },
+              ],
+            }
+          : undefined,
+        include: videoInclude,
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: limit,
+      });
+    },
+    CACHE_TTL.MEDIUM, // 5 minutes for admin
+  );
 }
 
 export async function getVideoCount(search = "") {
-  return getCachedVideoCount(search);
+  const cacheKey = `admin:videos:count:search:${search || "none"}`;
+
+  return getCachedData(
+    cacheKey,
+    async () => {
+      return prisma.video.count({
+        where: search
+          ? {
+              OR: [
+                { title: { contains: search, mode: "insensitive" } },
+                { slug: { contains: search, mode: "insensitive" } },
+                {
+                  category: { name: { contains: search, mode: "insensitive" } },
+                },
+                {
+                  tags: {
+                    some: {
+                      tag: { name: { contains: search, mode: "insensitive" } },
+                    },
+                  },
+                },
+              ],
+            }
+          : undefined,
+      });
+    },
+    CACHE_TTL.MEDIUM,
+  );
 }
 
 export async function getVideoFormOptions() {
-  const [categories, tags] = await Promise.all([
-    prisma.category.findMany({ orderBy: { name: "asc" } }),
-    prisma.tag.findMany({ orderBy: { name: "asc" } }),
-  ]);
+  const cacheKey = "admin:videos:form-options";
 
-  return { categories, tags };
+  return getCachedData(
+    cacheKey,
+    async () => {
+      const [categories, tags] = await Promise.all([
+        prisma.category.findMany({ orderBy: { name: "asc" } }),
+        prisma.tag.findMany({ orderBy: { name: "asc" } }),
+      ]);
+
+      return { categories, tags };
+    },
+    CACHE_TTL.VERY_LONG, // 24 hours for form options (rarely change)
+  );
 }
 
 // Enhanced function to invalidate all video-related caches
@@ -163,8 +183,9 @@ async function invalidateAllVideoCaches(
   await revalidateSearchCache();
 
   // Invalidate admin caches
-  await invalidateCachePattern("videos-list");
-  await invalidateCachePattern("videos-count");
+  await invalidateCachePattern(CACHE_PATTERNS.ADMIN.VIDEOS);
+  await invalidateCachePattern("admin:videos:*");
+  await invalidateCachePattern("admin:videos:form-options");
 
   // Revalidate Next.js paths
   revalidatePath("/admin/videos");
@@ -174,6 +195,9 @@ async function invalidateAllVideoCaches(
   }
 }
 
+// -------------------------
+// MUTATIONS
+// -------------------------
 export async function createVideoFromAsset(
   data: VideoMetadataInput,
   assetData: VideoAssetInput,
@@ -322,8 +346,9 @@ export async function bulkDeleteVideos(ids: string[]) {
 
   // Invalidate all caches (full reset)
   await revalidatePublicCaches();
-  await invalidateCachePattern("videos-list");
-  await invalidateCachePattern("videos-count");
+  await invalidateCachePattern(CACHE_PATTERNS.ADMIN.VIDEOS);
+  await invalidateCachePattern("admin:videos:*");
+  await invalidateCachePattern("admin:videos:form-options");
 
   revalidatePath("/admin/videos");
   revalidatePath("/");
@@ -337,4 +362,49 @@ function revalidateVideoPaths(slug: string) {
   revalidatePath("/admin/videos");
   revalidatePath("/");
   revalidatePath(`/watch/${slug}`);
+}
+
+// Additional helper for getting video stats
+export async function getVideoStats() {
+  const cacheKey = "admin:videos:stats";
+
+  return getCachedData(
+    cacheKey,
+    async () => {
+      const [total, published, unpublished, totalViews] = await Promise.all([
+        prisma.video.count(),
+        prisma.video.count({ where: { isPublished: true } }),
+        prisma.video.count({ where: { isPublished: false } }),
+        prisma.video.aggregate({
+          _sum: {
+            views: true,
+          },
+        }),
+      ]);
+
+      return {
+        total,
+        published,
+        unpublished,
+        totalViews: totalViews._sum.views || 0,
+      };
+    },
+    CACHE_TTL.SHORT, // 1 minute for stats
+  );
+}
+
+// Helper to get video by slug (for admin preview)
+export async function getVideoBySlug(slug: string) {
+  const cacheKey = `admin:video:slug:${slug}`;
+
+  return getCachedData(
+    cacheKey,
+    async () => {
+      return prisma.video.findUnique({
+        where: { slug },
+        include: videoInclude,
+      });
+    },
+    CACHE_TTL.SHORT,
+  );
 }

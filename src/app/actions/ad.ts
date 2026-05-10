@@ -5,7 +5,12 @@ import prisma from "@/lib/prisma";
 import { requireAdmin } from "@/lib/requireAdmin";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { invalidateCachePattern } from "@/lib/cache/cache-utils";
+import {
+  getCachedData,
+  invalidateCachePattern,
+  CACHE_TTL,
+  CACHE_PATTERNS,
+} from "@/lib/cache/cache-utils";
 import { revalidatePublicCaches } from "@/lib/videos/public-videos";
 
 //
@@ -13,9 +18,17 @@ import { revalidatePublicCaches } from "@/lib/videos/public-videos";
 //
 
 export async function getAds() {
-  return prisma.adUnit.findMany({
-    orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
-  });
+  const cacheKey = "admin:ads:list";
+
+  return getCachedData(
+    cacheKey,
+    async () => {
+      return prisma.adUnit.findMany({
+        orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
+      });
+    },
+    CACHE_TTL.MEDIUM, // 5 minutes for admin
+  );
 }
 
 type CreateAdInput = {
@@ -64,6 +77,12 @@ const settingsSchema = z.object({
   interstitialGapSeconds: z.number().int().min(10).max(3600).optional(),
   interstitialEveryVideos: z.number().int().min(1).max(20).optional(),
   popunderCooldownHours: z.number().int().min(1).max(168).optional(),
+  weightSmartlink: z.number().int().min(0).max(1000).optional(),
+  weightPopunder: z.number().int().min(0).max(1000).optional(),
+  weightInterstitial: z.number().int().min(0).max(1000).optional(),
+  weightSocialBar: z.number().int().min(0).max(1000).optional(),
+  weightBanner: z.number().int().min(0).max(1000).optional(),
+  weightNative: z.number().int().min(0).max(1000).optional(),
 });
 
 const idSchema = z.string().uuid();
@@ -80,13 +99,27 @@ const DEFAULT_SETTINGS = {
   interstitialGapSeconds: 60,
   interstitialEveryVideos: 3,
   popunderCooldownHours: 24,
+  weightSmartlink: 100,
+  weightPopunder: 120,
+  weightInterstitial: 90,
+  weightSocialBar: 70,
+  weightBanner: 40,
+  weightNative: 50,
 };
 
 // Helper function to invalidate all ad-related caches
 async function invalidateAllAdCaches() {
+  // Invalidate public ad caches
   await invalidateCachePattern("public:ads:*");
   await invalidateCachePattern("public:ad-settings:*");
+
+  // Invalidate admin ad caches
+  await invalidateCachePattern("admin:ads:*");
+
+  // Invalidate public caches
   await revalidatePublicCaches();
+
+  // Revalidate Next.js paths
   revalidatePath("/admin/ads");
   revalidatePath("/admin/ads/settings");
   revalidatePath("/");
@@ -95,6 +128,7 @@ async function invalidateAllAdCaches() {
 export async function createAd(data: CreateAdInput) {
   await requireAdmin();
   const parsed = createAdSchema.parse(data);
+
   const res = await prisma.adUnit.create({
     data: {
       type: parsed.type as AdType,
@@ -120,6 +154,7 @@ export async function updateAd(id: string, data: UpdateAdInput) {
   await requireAdmin();
   const parsedId = idSchema.parse(id);
   const parsed = updateAdSchema.parse(data);
+
   const res = await prisma.adUnit.update({
     where: { id: parsedId },
     data: {
@@ -149,6 +184,7 @@ export async function updateAd(id: string, data: UpdateAdInput) {
 export async function deleteAd(id: string) {
   await requireAdmin();
   const parsedId = idSchema.parse(id);
+
   const res = await prisma.adUnit.delete({
     where: { id: parsedId },
   });
@@ -162,10 +198,10 @@ export async function deleteAd(id: string) {
 //
 
 export async function getAdSettings() {
-  const { getCachedData } = await import("@/lib/cache/cache-utils");
+  const cacheKey = "public:ad-settings";
 
   return getCachedData(
-    "public:ad-settings",
+    cacheKey,
     async () => {
       let settings = await prisma.adSetting.findFirst();
       if (!settings) {
@@ -175,7 +211,7 @@ export async function getAdSettings() {
       }
       return settings;
     },
-    300,
+    CACHE_TTL.VERY_LONG, // 24 hours for settings
   );
 }
 
@@ -216,7 +252,6 @@ export async function getActiveAdsByPlacement(
   placement: string,
   type?: AdType,
 ) {
-  const { getCachedData } = await import("@/lib/cache/cache-utils");
   const cacheKey = `public:ads:placement:${placement}:type:${type || "all"}`;
 
   return getCachedData(
@@ -231,6 +266,76 @@ export async function getActiveAdsByPlacement(
         orderBy: [{ priority: "desc" }, { weight: "desc" }],
       });
     },
-    300,
+    CACHE_TTL.MEDIUM, // 5 minutes for ads
+  );
+}
+
+// Additional helper function to get ad by ID
+export async function getAdById(id: string) {
+  await requireAdmin();
+  const parsedId = idSchema.parse(id);
+  const cacheKey = `admin:ads:${parsedId}`;
+
+  return getCachedData(
+    cacheKey,
+    async () => {
+      return prisma.adUnit.findUnique({
+        where: { id: parsedId },
+      });
+    },
+    CACHE_TTL.MEDIUM,
+  );
+}
+
+// Additional helper to get ad statistics
+export async function getAdStats() {
+  await requireAdmin();
+  const cacheKey = "admin:ads:stats";
+
+  return getCachedData(
+    cacheKey,
+    async () => {
+      const [total, active, byType] = await Promise.all([
+        prisma.adUnit.count(),
+        prisma.adUnit.count({ where: { isActive: true } }),
+        prisma.adUnit.groupBy({
+          by: ["type"],
+          _count: true,
+          where: { isActive: true },
+        }),
+      ]);
+
+      return {
+        total,
+        active,
+        inactive: total - active,
+        byType: byType.reduce(
+          (acc, curr) => {
+            acc[curr.type] = curr._count;
+            return acc;
+          },
+          {} as Record<string, number>,
+        ),
+      };
+    },
+    CACHE_TTL.SHORT, // 1 minute for stats
+  );
+}
+
+// Helper to get all unique placements
+export async function getAdPlacements() {
+  const cacheKey = "public:ads:placements";
+
+  return getCachedData(
+    cacheKey,
+    async () => {
+      const placements = await prisma.adUnit.findMany({
+        where: { isActive: true },
+        select: { placement: true },
+        distinct: ["placement"],
+      });
+      return placements.map((p) => p.placement).filter(Boolean);
+    },
+    CACHE_TTL.LONG,
   );
 }

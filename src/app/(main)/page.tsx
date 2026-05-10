@@ -17,8 +17,8 @@ export default async function Home() {
 
   if (!videos || videos.length === 0) {
     return (
-      <div className="mx-auto max-w-7xl space-y-6 px-4 py-5">
-        <Alert>
+      <div className="min-h-[calc(100vh-134px)] flex items-center justify-center px-4">
+        <Alert className="w-full max-w-md mx-auto">
           <VideoIcon className="h-4 w-4" />
           <AlertTitle>No videos found</AlertTitle>
           <AlertDescription>
