@@ -26,18 +26,15 @@ export type AdContextType = {
   onVolumeChange: () => void;
   onFullscreen: () => void;
   onTimeUpdate: (seconds: number) => void;
-  onNextVideo: () => void;
   onInteraction: () => void;
   displayBannerAd: (placement: string) => MonetizationAd | null;
   displayNativeAd: (placement: string) => MonetizationAd | null;
   getBannerAd: (placement: string) => MonetizationAd | null;
   getNativeAd: (placement: string) => MonetizationAd | null;
   subscribe: (callback: (event: MonetizationResult) => void) => () => void;
-  interstitialAd: MonetizationResult | null;
+
   socialBarAd: MonetizationResult | null;
-  closeInterstitial: () => void;
   closeSocialBar: () => void;
-  isInterstitialSkipReady: boolean;
   settings: MonetizationSettings;
   ads: MonetizationAd[];
 };
@@ -55,12 +52,9 @@ export function AdProvider({
   settings: MonetizationSettings;
 }) {
   const engineRef = useRef<ReturnType<typeof initAdEngine> | null>(null);
-  const [interstitialAd, setInterstitialAd] =
-    useState<MonetizationResult | null>(null);
   const [socialBarAd, setSocialBarAd] = useState<MonetizationResult | null>(
     null,
   );
-  const [isInterstitialSkipReady, setIsInterstitialSkipReady] = useState(false);
   const subscribersRef = useRef<((event: MonetizationResult) => void)[]>([]);
 
   const notifySubscribers = useCallback((event: MonetizationResult) => {
@@ -70,12 +64,6 @@ export function AdProvider({
   const handleAdEvent = useCallback(
     (event: MonetizationResult) => {
       notifySubscribers(event);
-
-      if (event.type === "INTERSTITIAL") {
-        setInterstitialAd(event);
-        setIsInterstitialSkipReady(false);
-        setTimeout(() => setIsInterstitialSkipReady(true), 2500);
-      }
 
       if (event.type === "SOCIAL_BAR") {
         setSocialBarAd(event);
@@ -108,11 +96,6 @@ export function AdProvider({
     },
     [],
   );
-
-  const closeInterstitial = useCallback(() => {
-    setInterstitialAd(null);
-    setIsInterstitialSkipReady(false);
-  }, []);
 
   const closeSocialBar = useCallback(() => {
     setSocialBarAd(null);
@@ -169,7 +152,6 @@ export function AdProvider({
     onVolumeChange: () => engineRef.current?.handle("volumechange"),
     onFullscreen: () => engineRef.current?.handle("fullscreen"),
     onTimeUpdate: (seconds) => engineRef.current?.timeUpdate(seconds),
-    onNextVideo: () => engineRef.current?.nextVideo(),
     onInteraction: () => {
       engineRef.current?.click();
       engineRef.current?.handle("first-interaction");
@@ -179,11 +161,8 @@ export function AdProvider({
     getBannerAd,
     getNativeAd,
     subscribe,
-    interstitialAd,
     socialBarAd,
-    closeInterstitial,
     closeSocialBar,
-    isInterstitialSkipReady,
     settings,
     ads,
   };

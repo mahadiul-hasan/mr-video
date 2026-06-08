@@ -10,14 +10,11 @@ import type {
 const DEFAULT_AD_SETTINGS: MonetizationSettings = {
   popunderEnabled: true,
   smartlinkEnabled: true,
-  interstitialEnabled: true,
   socialBarEnabled: true,
   bannerEnabled: true,
   nativeEnabled: true,
   smartlinkMinPerMinute: 2,
   smartlinkMaxPerMinute: 3,
-  interstitialGapSeconds: 60,
-  interstitialEveryVideos: 3,
   popunderCooldownHours: 24,
 };
 
@@ -59,14 +56,11 @@ export const getPublicAdsConfig = cache(
 function mapSettings(settings: {
   popunderEnabled: boolean;
   smartlinkEnabled: boolean;
-  interstitialEnabled: boolean;
   socialBarEnabled: boolean;
   bannerEnabled: boolean;
   nativeEnabled: boolean;
   smartlinkMinPerMinute: number;
   smartlinkMaxPerMinute: number;
-  interstitialGapSeconds: number;
-  interstitialEveryVideos: number;
   popunderCooldownHours: number;
 }): MonetizationSettings {
   return settings;

@@ -1,64 +1,123 @@
+// components/admin/categories/category-form.tsx
 "use client";
 
-import { useState, useTransition } from "react";
-import { createCategory, updateCategory } from "@/app/actions/category";
+import { useActionState, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { toast } from "sonner";
+import { slugify } from "@/lib/videos/slug";
 
-export default function CategoryForm({
-  onSuccess,
-  initialData,
-}: {
-  onSuccess?: () => void;
+type CategoryFormProps = {
+  action: (prevState: any, formData: FormData) => Promise<any>;
   initialData?: {
     id?: string;
-    name: string;
-    slug: string;
-  } | null;
-}) {
-  const [name, setName] = useState(initialData?.name ?? "");
-  const [slug, setSlug] = useState(initialData?.slug ?? "");
-  const [isPending, startTransition] = useTransition();
+    name?: string;
+    slug?: string;
+  };
+  submitLabel: string;
+  redirectTo?: string;
+};
 
-  const isEdit = !!initialData?.id;
+export function CategoryForm({
+  action,
+  initialData,
+  submitLabel,
+  redirectTo,
+}: CategoryFormProps) {
+  const router = useRouter();
+  const [state, formAction, isPending] = useActionState(action, {
+    success: false,
+    error: null,
+    data: null,
+  });
 
-  function handleSubmit() {
-    startTransition(async () => {
-      if (isEdit && initialData?.id) {
-        await updateCategory(initialData.id, { name, slug });
-      } else {
-        await createCategory({ name, slug });
+  // Local state for form fields
+  const [name, setName] = useState(initialData?.name || "");
+  const [slug, setSlug] = useState(initialData?.slug || "");
+  const [isSlugManuallyEdited, setIsSlugManuallyEdited] = useState(false);
+
+  // Auto-generate slug when name changes (only if not manually edited)
+  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newName = e.target.value;
+    setName(newName);
+
+    if (!isSlugManuallyEdited) {
+      setSlug(slugify(newName));
+    }
+  };
+
+  const handleSlugChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSlug(e.target.value);
+    setIsSlugManuallyEdited(true);
+  };
+
+  useEffect(() => {
+    if (state?.success) {
+      toast.success(
+        `Category ${initialData?.id ? "updated" : "created"} successfully.`,
+        {
+          position: "top-right",
+        },
+      );
+
+      if (redirectTo) {
+        router.push(redirectTo);
+        router.refresh();
       }
+    }
 
-      setName("");
-      setSlug("");
-      onSuccess?.();
-    });
-  }
+    if (state?.error) {
+      toast.error(state.error, {
+        position: "top-right",
+      });
+    }
+  }, [state?.success, state?.error, redirectTo, router, initialData?.id]);
 
   return (
-    <div className="space-y-2 border p-3 rounded-md">
-      <Input
-        placeholder="Category name"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-      />
+    <form action={formAction} className="space-y-4">
+      {state?.error && (
+        <Alert variant="destructive">
+          <AlertDescription>{state.error}</AlertDescription>
+        </Alert>
+      )}
 
-      <Input
-        placeholder="Slug"
-        value={slug}
-        onChange={(e) => setSlug(e.target.value)}
-      />
+      <div className="space-y-2">
+        <Label htmlFor="name">Category Name *</Label>
+        <Input
+          id="name"
+          name="name"
+          placeholder="Enter category name"
+          value={name}
+          onChange={handleNameChange}
+          required
+          className="w-full"
+        />
+      </div>
 
-      <Button onClick={handleSubmit} disabled={isPending}>
-        {isPending
-          ? isEdit
-            ? "Updating..."
-            : "Creating..."
-          : isEdit
-            ? "Update Category"
-            : "Create Category"}
+      <div className="space-y-2">
+        <Label htmlFor="slug">Slug *</Label>
+        <Input
+          id="slug"
+          name="slug"
+          placeholder="category-url-slug"
+          value={slug}
+          onChange={handleSlugChange}
+          required
+          className="w-full"
+        />
+        <p className="text-sm text-muted-foreground">
+          {!isSlugManuallyEdited && slug && "Auto-generated from name"}
+          {!isSlugManuallyEdited && !slug && "Will be auto-generated"}
+          {isSlugManuallyEdited && "Manually edited (auto-generation paused)"}
+        </p>
+      </div>
+
+      <Button type="submit" disabled={isPending} className="w-full">
+        {isPending ? "Processing..." : submitLabel}
       </Button>
-    </div>
+    </form>
   );
 }

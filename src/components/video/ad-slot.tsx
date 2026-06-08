@@ -1,9 +1,11 @@
+// components/video/ad-slot.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useAd } from "@/components/providers/ad-provider";
 import type { MonetizationAd } from "@/lib/ads/engine/types";
 import { AdPlacement } from "@/lib/ads/ad-placements";
+import { renderAdScript } from "@/lib/ads/engine/executor";
 
 interface AdSlotProps {
   placement: AdPlacement;
@@ -20,19 +22,16 @@ export function AdSlot({
   compact,
   ad: propAd,
 }: AdSlotProps) {
-  const [ad, setAd] = useState<MonetizationAd | null>(propAd || null);
-  const { displayBannerAd, displayNativeAd } = useAd();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const { getBannerAd, getNativeAd } = useAd();
+  const ad =
+    propAd ??
+    (type === "BANNER" ? getBannerAd(placement) : getNativeAd(placement));
 
   useEffect(() => {
-    // If ad is passed via props, don't fetch it again
-    if (propAd) return;
-
-    const adResult =
-      type === "BANNER"
-        ? displayBannerAd(placement)
-        : displayNativeAd(placement);
-    setAd(adResult);
-  }, [placement, type, displayBannerAd, displayNativeAd, propAd]);
+    if (!ad || !containerRef.current) return;
+    renderAdScript(containerRef.current, ad.script);
+  }, [ad]);
 
   if (!ad) return null;
 
@@ -43,10 +42,7 @@ export function AdSlot({
           {label}
         </div>
       )}
-      <div
-        dangerouslySetInnerHTML={{ __html: ad.script }}
-        className="ad-container"
-      />
+      <div ref={containerRef} className="ad-container" />
     </div>
   );
 }

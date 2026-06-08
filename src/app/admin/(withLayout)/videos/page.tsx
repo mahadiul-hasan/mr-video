@@ -1,44 +1,44 @@
-import { Metadata } from "next";
-import {
-  getVideoCount,
-  getVideoFormOptions,
-  getVideos,
-} from "@/app/actions/video";
+import { getVideosAdmin } from "@/app/actions/video";
 import VideoTable from "@/components/admin/videos/video-table";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-export const metadata: Metadata = {
-  title: "MR Video | Video Management",
-  description: "Manage uploaded videos",
+export const metadata = {
+  title: "Videos - Admin",
+  description: "Manage your video library",
 };
 
-export default async function Page({
-  searchParams,
-}: {
-  searchParams: Promise<{ page?: string; search?: string }>;
-}) {
+type PageProps = {
+  searchParams: Promise<{
+    page?: string;
+    search?: string;
+  }>;
+};
+
+export default async function VideosPage({ searchParams }: PageProps) {
   const params = await searchParams;
-  const page = Number(params.page ?? 1);
-  const search = params.search ?? "";
+  const page = params.page ? parseInt(params.page) : 1;
+  const search = params.search || "";
   const limit = 10;
 
-  const [videos, total, options] = await Promise.all([
-    getVideos({ page, limit, search }),
-    getVideoCount(search),
-    getVideoFormOptions(),
-  ]);
+  const { videos, total } = await getVideosAdmin({ page, limit, search });
 
   return (
-    <VideoTable
-      data={videos}
-      total={total}
-      page={page}
-      search={search}
-      categories={options.categories}
-      tags={options.tags}
-      uploadConfig={{
-        cloudName: process.env.CLOUDINARY_CLOUD_NAME ?? "",
-        uploadPreset: process.env.CLOUDINARY_UPLOAD_PRESET ?? "",
-      }}
-    />
+    <div className="container py-8">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold">Video Manager</h1>
+        <p className="text-muted-foreground mt-1">
+          Upload, manage, and publish videos to your library
+        </p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>All Videos</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <VideoTable data={videos} total={total} page={page} search={search} />
+        </CardContent>
+      </Card>
+    </div>
   );
 }

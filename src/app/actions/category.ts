@@ -110,16 +110,44 @@ export async function createCategory(data: { name: string; slug: string }) {
   const parsed = categorySchema.parse(data);
   const slug = slugify(parsed.slug || parsed.name);
 
-  const result = await prisma.category.create({
-    data: {
-      name: parsed.name,
-      slug: slug,
-    },
-  });
+  try {
+    const result = await prisma.category.create({
+      data: {
+        name: parsed.name,
+        slug: slug,
+      },
+    });
 
-  await invalidateAllCategoryCaches(slug);
+    await invalidateAllCategoryCaches(slug);
 
-  return result;
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Failed to create category",
+    };
+  }
+}
+
+export async function getCategoryById(id: string) {
+  try {
+    const category = await prisma.category.findUnique({
+      where: { id },
+    });
+
+    if (!category) {
+      return { success: false, error: "Category not found" };
+    }
+
+    return { success: true, data: category };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Failed to fetch category",
+    };
+  }
 }
 
 export async function updateCategory(
@@ -139,20 +167,28 @@ export async function updateCategory(
     parsed.slug || parsed.name || currentCategory?.slug || "",
   );
 
-  const result = await prisma.category.update({
-    where: { id: parsedId },
-    data: {
-      ...(parsed.name ? { name: parsed.name } : {}),
-      ...(parsed.slug || parsed.name ? { slug: newSlug } : {}),
-    },
-  });
+  try {
+    const result = await prisma.category.update({
+      where: { id: parsedId },
+      data: {
+        ...(parsed.name ? { name: parsed.name } : {}),
+        ...(parsed.slug || parsed.name ? { slug: newSlug } : {}),
+      },
+    });
 
-  if (currentCategory?.slug) {
-    await invalidateAllCategoryCaches(currentCategory.slug);
+    if (currentCategory?.slug) {
+      await invalidateAllCategoryCaches(currentCategory.slug);
+    }
+    await invalidateAllCategoryCaches(newSlug);
+
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Failed to update category",
+    };
   }
-  await invalidateAllCategoryCaches(newSlug);
-
-  return result;
 }
 
 export async function deleteCategory(id: string) {
@@ -164,15 +200,23 @@ export async function deleteCategory(id: string) {
     select: { slug: true },
   });
 
-  const result = await prisma.category.delete({
-    where: { id: parsedId },
-  });
+  try {
+    const result = await prisma.category.delete({
+      where: { id: parsedId },
+    });
 
-  if (category?.slug) {
-    await invalidateAllCategoryCaches(category.slug);
+    if (category?.slug) {
+      await invalidateAllCategoryCaches(category.slug);
+    }
+
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Failed to delete category",
+    };
   }
-
-  return result;
 }
 
 export async function bulkDeleteCategories(ids: string[]) {
@@ -184,19 +228,27 @@ export async function bulkDeleteCategories(ids: string[]) {
     select: { slug: true },
   });
 
-  const result = await prisma.category.deleteMany({
-    where: {
-      id: { in: parsedIds },
-    },
-  });
+  try {
+    const result = await prisma.category.deleteMany({
+      where: {
+        id: { in: parsedIds },
+      },
+    });
 
-  for (const category of categories) {
-    if (category.slug) {
-      await invalidateAllCategoryCaches(category.slug);
+    for (const category of categories) {
+      if (category.slug) {
+        await invalidateAllCategoryCaches(category.slug);
+      }
     }
+
+    await revalidatePublicCaches();
+
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Failed to delete categories",
+    };
   }
-
-  await revalidatePublicCaches();
-
-  return result;
 }

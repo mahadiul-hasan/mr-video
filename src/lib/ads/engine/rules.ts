@@ -32,23 +32,6 @@ export function canTriggerSmartlink(
   return session.smartClicks < settings.smartlinkMaxPerMinute;
 }
 
-export function canTriggerInterstitial(
-  session: AdSessionState,
-  settings: MonetizationSettings,
-) {
-  if (!settings.interstitialEnabled) return false;
-
-  const interval = settings.interstitialEveryVideos;
-  if (session.videoCount === 0 || session.videoCount % interval !== 0) {
-    return false;
-  }
-
-  const now = Date.now();
-  const last = session.lastInterstitial || 0;
-
-  return now - last > settings.interstitialGapSeconds * 1000;
-}
-
 export function canTriggerPushPrompt(
   session: AdSessionState,
   settings: MonetizationSettings,

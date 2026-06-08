@@ -13,15 +13,12 @@ import { toast } from "sonner";
 type AdSettingsState = {
   popunderEnabled: boolean;
   smartlinkEnabled: boolean;
-  interstitialEnabled: boolean;
   socialBarEnabled: boolean;
   bannerEnabled: boolean;
   nativeEnabled: boolean;
 
   smartlinkMinPerMinute: number;
   smartlinkMaxPerMinute: number;
-  interstitialGapSeconds: number;
-  interstitialEveryVideos: number;
   popunderCooldownHours: number;
 };
 
@@ -35,15 +32,12 @@ export default function AdSettingsForm({
   const [settings, setSettings] = useState<AdSettingsState>({
     popunderEnabled: initialData?.popunderEnabled ?? true,
     smartlinkEnabled: initialData?.smartlinkEnabled ?? true,
-    interstitialEnabled: initialData?.interstitialEnabled ?? true,
     socialBarEnabled: initialData?.socialBarEnabled ?? true,
     bannerEnabled: initialData?.bannerEnabled ?? true,
     nativeEnabled: initialData?.nativeEnabled ?? true,
 
     smartlinkMinPerMinute: initialData?.smartlinkMinPerMinute ?? 2,
     smartlinkMaxPerMinute: initialData?.smartlinkMaxPerMinute ?? 3,
-    interstitialGapSeconds: initialData?.interstitialGapSeconds ?? 60,
-    interstitialEveryVideos: initialData?.interstitialEveryVideos ?? 3,
     popunderCooldownHours: initialData?.popunderCooldownHours ?? 24,
   });
 
@@ -82,7 +76,6 @@ export default function AdSettingsForm({
       AdSettingsState,
       | "popunderEnabled"
       | "smartlinkEnabled"
-      | "interstitialEnabled"
       | "socialBarEnabled"
       | "bannerEnabled"
       | "nativeEnabled"
@@ -92,7 +85,6 @@ export default function AdSettingsForm({
   }[] = [
     { key: "popunderEnabled", label: "Popunder", id: "pop" },
     { key: "smartlinkEnabled", label: "SmartLink", id: "smart" },
-    { key: "interstitialEnabled", label: "Interstitial", id: "inter" },
     { key: "socialBarEnabled", label: "Social Bar", id: "social" },
     { key: "bannerEnabled", label: "Banner", id: "banner" },
     { key: "nativeEnabled", label: "Native", id: "native" },
@@ -103,16 +95,12 @@ export default function AdSettingsForm({
       AdSettingsState,
       | "smartlinkMinPerMinute"
       | "smartlinkMaxPerMinute"
-      | "interstitialGapSeconds"
-      | "interstitialEveryVideos"
       | "popunderCooldownHours"
     >;
     label: string;
   }[] = [
     { key: "smartlinkMinPerMinute", label: "Smartlink Min/min" },
     { key: "smartlinkMaxPerMinute", label: "Smartlink Max/min" },
-    { key: "interstitialGapSeconds", label: "Interstitial Gap (sec)" },
-    { key: "interstitialEveryVideos", label: "Every X Videos" },
     { key: "popunderCooldownHours", label: "Popunder Cooldown (hrs)" },
   ];
 

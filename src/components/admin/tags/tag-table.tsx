@@ -1,25 +1,25 @@
+// components/admin/tags/tag-table.tsx
 "use client";
 
+import { useTransition, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
-
+import Link from "next/link";
 import { deleteTag, bulkDeleteTags } from "@/app/actions/tag";
-
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-
-import TagForm from "./tag-form";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { Edit, Trash2, Search } from "lucide-react";
 import DeleteDialog from "@/components/ui/delete-dialog";
+import { toast } from "sonner";
 
 type Tag = {
   id: string;
@@ -27,165 +27,124 @@ type Tag = {
   slug: string;
 };
 
-export default function TagTable({
-  data,
-  total,
-  page,
-  search,
-}: {
-  data: Tag[];
+type TagTableProps = {
+  tags: Tag[];
   total: number;
-  page: number;
+  currentPage: number;
   search: string;
-}) {
+};
+
+export function TagTable({ tags, total, currentPage, search }: TagTableProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-
   const [searchInput, setSearchInput] = useState(search || "");
   const [selected, setSelected] = useState<string[]>([]);
-
-  const [editItem, setEditItem] = useState<Tag | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-
-  // Add this state for the alert dialog
-  const [alertDialog, setAlertDialog] = useState<{
-    open: boolean;
-    title: string;
-    message: string;
-    type: "error" | "warning" | "success";
-  }>({
-    open: false,
-    title: "",
-    message: "",
-    type: "error",
-  });
 
   const limit = 10;
   const totalPages = Math.ceil(total / limit);
 
-  // SEARCH
-  function handleSearch() {
-    router.push(`/admin/tags?page=1&search=${searchInput}`);
-  }
+  const handleSearch = () => {
+    router.push(`/admin/tags?page=1&search=${encodeURIComponent(searchInput)}`);
+  };
 
-  // PAGINATION
-  function goToPage(p: number) {
-    router.push(`/admin/tags?page=${p}&search=${search}`);
-  }
+  const goToPage = (page: number) => {
+    router.push(
+      `/admin/tags?page=${page}&search=${encodeURIComponent(search)}`,
+    );
+  };
 
-  // SELECT
-  function toggleSelect(id: string) {
+  const toggleSelect = (id: string) => {
     setSelected((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
-  }
+  };
 
-  function toggleSelectAll() {
-    if (selected.length === data.length) {
+  const toggleSelectAll = () => {
+    if (selected.length === tags.length) {
       setSelected([]);
     } else {
-      setSelected(data.map((d) => d.id));
+      setSelected(tags.map((t) => t.id));
     }
-  }
+  };
 
-  // BULK DELETE
-  function handleBulkDelete() {
+  const handleBulkDelete = () => {
     startTransition(async () => {
-      try {
-        const result = await bulkDeleteTags(selected);
+      const result = await bulkDeleteTags(selected);
 
-        // Show success message
-        setAlertDialog({
-          open: true,
-          title: "Success",
-          type: "success",
-          message: `Successfully deleted ${selected.length} tag(s) and removed them from all videos.`,
+      if (result.success) {
+        toast.success(`Deleted ${result.deletedCount} tag(s) successfully.`, {
+          position: "top-right",
         });
+
+        if (result.nonDeletableTags?.length > 0) {
+          toast.warning(
+            `${result.nonDeletableTags.length} tag(s) couldn't be deleted because they're used in videos.`,
+            { position: "top-right" },
+          );
+        }
 
         setSelected([]);
         router.refresh();
-      } catch (error) {
-        setAlertDialog({
-          open: true,
-          title: "Error",
-          type: "error",
-          message:
-            error instanceof Error ? error.message : "Failed to delete tags",
+      } else if (result.error === "TAGS_IN_USE") {
+        toast.error(
+          result.message ||
+            "Cannot delete tags that are associated with videos",
+          {
+            position: "top-right",
+          },
+        );
+      } else {
+        toast.error(result.error || "Failed to delete tags", {
+          position: "top-right",
         });
       }
     });
-  }
+  };
 
-  // SINGLE DELETE
-  function handleDelete() {
+  const handleDelete = () => {
     if (!deleteId) return;
 
     startTransition(async () => {
-      try {
-        await deleteTag(deleteId);
+      const result = await deleteTag(deleteId);
 
-        setAlertDialog({
-          open: true,
-          title: "Success",
-          type: "success",
-          message: "Tag deleted successfully and removed from all videos.",
+      if (result.success) {
+        toast.success(`Tag "${result.deletedTag}" deleted successfully.`, {
+          position: "top-right",
         });
-
         setDeleteId(null);
         router.refresh();
-      } catch (error) {
-        setAlertDialog({
-          open: true,
-          title: "Error",
-          type: "error",
-          message:
-            error instanceof Error ? error.message : "Failed to delete tag",
+      } else if (result.error === "TAG_IN_USE") {
+        toast.error(
+          result.message || "Cannot delete tag that is associated with videos",
+          {
+            position: "top-right",
+          },
+        );
+        setDeleteId(null);
+      } else {
+        toast.error(result.error || "Failed to delete tag", {
+          position: "top-right",
         });
         setDeleteId(null);
       }
     });
-  }
+  };
 
   return (
     <div className="space-y-4">
-      {/* HEADER */}
-      <div className="flex justify-between items-center">
-        <h1 className="text-lg font-semibold">Tags</h1>
-
-        <Button
-          onClick={() =>
-            setEditItem({
-              id: "",
-              name: "",
-              slug: "",
-            })
-          }
-        >
-          + Create
-        </Button>
-      </div>
-
-      {/* FORM */}
-      {editItem && (
-        <TagForm
-          key={editItem.id || "create"}
-          initialData={editItem?.id ? editItem : null}
-          onSuccess={() => {
-            setEditItem(null);
-            router.refresh();
-          }}
-        />
-      )}
-
-      {/* SEARCH */}
-      <div className="flex gap-2">
-        <Input
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          placeholder="Search tags..."
-        />
-
-        <Button onClick={handleSearch}>Search</Button>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <div className="flex-1 flex gap-2">
+          <Input
+            placeholder="Search tags..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+          />
+          <Button onClick={handleSearch} variant="secondary" size="icon">
+            <Search className="h-4 w-4" />
+          </Button>
+        </div>
 
         {selected.length > 0 && (
           <Button
@@ -193,114 +152,117 @@ export default function TagTable({
             onClick={handleBulkDelete}
             disabled={isPending}
           >
-            {isPending ? "Deleting..." : `Delete (${selected.length})`}
+            Delete Selected ({selected.length})
           </Button>
         )}
       </div>
 
-      {/* TABLE */}
-      <div className="border rounded-md overflow-x-auto">
-        <table className="w-full min-w-150 text-sm">
-          <thead className="bg-muted">
-            <tr>
-              <th className="p-2 text-left w-10">
-                <input
-                  type="checkbox"
-                  checked={selected.length === data.length && data.length > 0}
-                  onChange={toggleSelectAll}
+      <div className="border rounded-md">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-10">
+                <Checkbox
+                  checked={selected.length === tags.length && tags.length > 0}
+                  onCheckedChange={toggleSelectAll}
                 />
-              </th>
-              <th className="p-2 text-left">Name</th>
-              <th className="p-2 text-left">Slug</th>
-              <th className="p-2 text-right">Actions</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {data.map((tag) => (
-              <tr key={tag.id} className="border-b">
-                <td className="p-2">
-                  <input
-                    type="checkbox"
+              </TableHead>
+              <TableHead>Name</TableHead>
+              <TableHead>Slug</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {tags.map((tag) => (
+              <TableRow key={tag.id}>
+                <TableCell>
+                  <Checkbox
                     checked={selected.includes(tag.id)}
-                    onChange={() => toggleSelect(tag.id)}
+                    onCheckedChange={() => toggleSelect(tag.id)}
                   />
-                </td>
-                <td className="p-2">{tag.name}</td>
-                <td className="p-2 text-muted-foreground">{tag.slug}</td>
-                <td className="p-2 text-right flex gap-2 justify-end">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setEditItem(tag)}
-                  >
-                    Edit
-                  </Button>
-
+                </TableCell>
+                <TableCell className="font-medium">{tag.name}</TableCell>
+                <TableCell>
+                  <Badge variant="outline">{tag.slug}</Badge>
+                </TableCell>
+                <TableCell className="text-right space-x-2">
+                  <Link href={`/admin/tags/${tag.id}/edit`}>
+                    <Button size="sm" variant="outline">
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                  </Link>
                   <Button
                     size="sm"
                     variant="destructive"
                     onClick={() => setDeleteId(tag.id)}
+                    disabled={isPending}
                   >
-                    Delete
+                    <Trash2 className="h-4 w-4" />
                   </Button>
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
+
+        {tags.length === 0 && (
+          <div className="text-center py-8 text-muted-foreground">
+            {search
+              ? "No tags found matching your search."
+              : "No tags yet. Create your first tag!"}
+          </div>
+        )}
       </div>
 
-      {/* PAGINATION */}
-      {total > limit && (
-        <div className="flex gap-2 flex-wrap">
-          {Array.from({ length: totalPages }).map((_, i) => (
-            <Button
-              key={i}
-              variant={page === i + 1 ? "default" : "outline"}
-              onClick={() => goToPage(i + 1)}
-            >
-              {i + 1}
-            </Button>
-          ))}
+      {totalPages > 1 && (
+        <div className="flex flex-wrap justify-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => goToPage(currentPage - 1)}
+            disabled={currentPage === 1}
+          >
+            Previous
+          </Button>
+
+          {Array.from({ length: Math.min(5, totalPages) }).map((_, i) => {
+            let pageNum;
+            if (totalPages <= 5) {
+              pageNum = i + 1;
+            } else if (currentPage <= 3) {
+              pageNum = i + 1;
+            } else if (currentPage >= totalPages - 2) {
+              pageNum = totalPages - 4 + i;
+            } else {
+              pageNum = currentPage - 2 + i;
+            }
+
+            return (
+              <Button
+                key={pageNum}
+                variant={currentPage === pageNum ? "default" : "outline"}
+                onClick={() => goToPage(pageNum)}
+              >
+                {pageNum}
+              </Button>
+            );
+          })}
+
+          <Button
+            variant="outline"
+            onClick={() => goToPage(currentPage + 1)}
+            disabled={currentPage === totalPages}
+          >
+            Next
+          </Button>
         </div>
       )}
 
-      {/* DELETE CONFIRM */}
       <DeleteDialog
         open={!!deleteId}
         onOpenChange={() => setDeleteId(null)}
         loading={isPending}
         onConfirm={handleDelete}
       />
-
-      {/* ALERT DIALOG FOR FEEDBACK */}
-      <AlertDialog
-        open={alertDialog.open}
-        onOpenChange={(open) => setAlertDialog({ ...alertDialog, open })}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle
-              className={
-                alertDialog.type === "error"
-                  ? "text-destructive"
-                  : alertDialog.type === "warning"
-                    ? "text-yellow-600"
-                    : "text-green-600"
-              }
-            >
-              {alertDialog.title}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {alertDialog.message}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction>OK</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

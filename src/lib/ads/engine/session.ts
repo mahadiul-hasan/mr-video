@@ -7,9 +7,6 @@ export type AdSessionState = {
 
   popunderShown: boolean;
 
-  interstitialCount: number;
-  lastInterstitial: number;
-
   pushPromptShown: boolean;
 
   videoCount: number;
@@ -25,8 +22,6 @@ function createDefaultSession(): AdSessionState {
     windowStart: Date.now(),
     lastSmartTrigger: 0,
     popunderShown: false,
-    interstitialCount: 0,
-    lastInterstitial: 0,
     pushPromptShown: false,
     videoCount: 0,
     popunderShownAt: null,
@@ -43,7 +38,10 @@ export function getSession(): AdSessionState {
   if (!raw) return fallback;
 
   try {
-    const session = { ...fallback, ...JSON.parse(raw) } satisfies AdSessionState;
+    const session = {
+      ...fallback,
+      ...JSON.parse(raw),
+    } satisfies AdSessionState;
 
     if (Date.now() - session.windowStart >= 60000) {
       session.windowStart = Date.now();

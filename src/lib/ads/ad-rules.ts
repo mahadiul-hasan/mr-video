@@ -5,10 +5,5 @@ export function requiresPlacement(type: AdType) {
 }
 
 export function isSystemAd(type: AdType) {
-  return (
-    type === "POPUNDER" ||
-    type === "SOCIAL_BAR" ||
-    type === "SMARTLINK" ||
-    type === "INTERSTITIAL"
-  );
+  return type === "POPUNDER" || type === "SOCIAL_BAR" || type === "SMARTLINK";
 }

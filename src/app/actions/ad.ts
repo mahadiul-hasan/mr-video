@@ -9,7 +9,6 @@ import {
   getCachedData,
   invalidateCachePattern,
   CACHE_TTL,
-  CACHE_PATTERNS,
 } from "@/lib/cache/cache-utils";
 import { revalidatePublicCaches } from "@/lib/videos/public-videos";
 
@@ -47,7 +46,6 @@ const adTypeSchema = z.enum([
   "NATIVE_BANNER",
   "BANNER",
   "SMARTLINK",
-  "INTERSTITIAL",
 ]);
 
 const createAdSchema = z.object({
@@ -68,18 +66,14 @@ const updateAdSchema = createAdSchema.partial().extend({
 const settingsSchema = z.object({
   popunderEnabled: z.boolean().optional(),
   smartlinkEnabled: z.boolean().optional(),
-  interstitialEnabled: z.boolean().optional(),
   socialBarEnabled: z.boolean().optional(),
   bannerEnabled: z.boolean().optional(),
   nativeEnabled: z.boolean().optional(),
   smartlinkMinPerMinute: z.number().int().min(0).max(10).optional(),
   smartlinkMaxPerMinute: z.number().int().min(1).max(10).optional(),
-  interstitialGapSeconds: z.number().int().min(10).max(3600).optional(),
-  interstitialEveryVideos: z.number().int().min(1).max(20).optional(),
   popunderCooldownHours: z.number().int().min(1).max(168).optional(),
   weightSmartlink: z.number().int().min(0).max(1000).optional(),
   weightPopunder: z.number().int().min(0).max(1000).optional(),
-  weightInterstitial: z.number().int().min(0).max(1000).optional(),
   weightSocialBar: z.number().int().min(0).max(1000).optional(),
   weightBanner: z.number().int().min(0).max(1000).optional(),
   weightNative: z.number().int().min(0).max(1000).optional(),
@@ -90,18 +84,14 @@ const idSchema = z.string().uuid();
 const DEFAULT_SETTINGS = {
   popunderEnabled: true,
   smartlinkEnabled: true,
-  interstitialEnabled: true,
   socialBarEnabled: true,
   bannerEnabled: true,
   nativeEnabled: true,
   smartlinkMinPerMinute: 2,
   smartlinkMaxPerMinute: 3,
-  interstitialGapSeconds: 60,
-  interstitialEveryVideos: 3,
   popunderCooldownHours: 24,
   weightSmartlink: 100,
   weightPopunder: 120,
-  weightInterstitial: 90,
   weightSocialBar: 70,
   weightBanner: 40,
   weightNative: 50,
@@ -173,7 +163,8 @@ export async function updateAd(id: string, data: UpdateAdInput) {
           : (parsed.frequencyCap ?? undefined),
       weight: parsed.weight === null ? 1 : (parsed.weight ?? undefined),
       isActive: parsed.isActive,
-      priority: parsed.priority,
+      // Fix: Only update priority if it's provided (not undefined)
+      ...(parsed.priority !== undefined ? { priority: parsed.priority } : {}),
     },
   });
 

@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { headers } from "next/headers";
 import { verifyToken } from "./auth";
 import { rateLimit } from "./rate-limit";
+import { redirect } from "next/navigation";
 
 export async function requireAdmin() {
   const headerStore = await headers();
@@ -18,28 +19,34 @@ export async function requireAdmin() {
     );
 
     if (!rateLimitResult.success) {
-      throw new Error("Too many requests. Please try again later.");
+      return { error: "Too many requests. Please try again later." };
     }
   } catch (error) {
     if (error instanceof Error && error.message.includes("Too many requests")) {
-      throw error;
+      return { error: error.message };
     }
-    throw new Error("Unable to process request");
+    return { error: "Unable to process request" };
   }
 
   if (origin && host) {
     const originHost = new URL(origin).host;
-    if (originHost !== host) throw new Error("Invalid request origin");
+    if (originHost !== host) {
+      return { error: "Invalid request origin" };
+    }
   }
 
   const cookieStore = await cookies();
   const token = cookieStore.get("admin_token")?.value;
 
-  if (!token) throw new Error("Unauthorized");
+  if (!token) {
+    redirect("/admin/login");
+  }
 
   const payload = await verifyToken(token);
 
-  if (!payload) throw new Error("Unauthorized");
+  if (!payload) {
+    redirect("/admin/login");
+  }
 
-  return payload;
+  return { payload };
 }

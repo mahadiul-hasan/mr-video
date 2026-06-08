@@ -68,9 +68,9 @@ CREATE TABLE "AdUnit" (
     "placement" TEXT,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "priority" INTEGER NOT NULL DEFAULT 0,
+    "weight" INTEGER NOT NULL DEFAULT 1,
     "cooldownSeconds" INTEGER,
     "frequencyCap" INTEGER,
-    "weight" INTEGER NOT NULL DEFAULT 1,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "AdUnit_pkey" PRIMARY KEY ("id")
@@ -90,6 +90,12 @@ CREATE TABLE "AdSetting" (
     "interstitialGapSeconds" INTEGER NOT NULL DEFAULT 60,
     "interstitialEveryVideos" INTEGER NOT NULL DEFAULT 3,
     "popunderCooldownHours" INTEGER NOT NULL DEFAULT 24,
+    "weightSmartlink" INTEGER NOT NULL DEFAULT 100,
+    "weightPopunder" INTEGER NOT NULL DEFAULT 120,
+    "weightInterstitial" INTEGER NOT NULL DEFAULT 90,
+    "weightSocialBar" INTEGER NOT NULL DEFAULT 70,
+    "weightBanner" INTEGER NOT NULL DEFAULT 40,
+    "weightNative" INTEGER NOT NULL DEFAULT 50,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "AdSetting_pkey" PRIMARY KEY ("id")
@@ -99,12 +105,13 @@ CREATE TABLE "AdSetting" (
 CREATE TABLE "AdSession" (
     "id" TEXT NOT NULL,
     "sessionId" TEXT NOT NULL,
+    "videoCount" INTEGER NOT NULL DEFAULT 0,
     "smartClicks" INTEGER NOT NULL DEFAULT 0,
     "interstitialCount" INTEGER NOT NULL DEFAULT 0,
-    "videoCount" INTEGER NOT NULL DEFAULT 0,
-    "popunderShown" BOOLEAN NOT NULL DEFAULT false,
     "lastSmartTrigger" TIMESTAMP(3),
     "lastInterstitial" TIMESTAMP(3),
+    "lastPopunder" TIMESTAMP(3),
+    "engagementScore" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -163,7 +170,7 @@ CREATE INDEX "VideoTag_videoId_idx" ON "VideoTag"("videoId");
 CREATE INDEX "AdUnit_type_isActive_idx" ON "AdUnit"("type", "isActive");
 
 -- CreateIndex
-CREATE INDEX "AdUnit_placement_isActive_idx" ON "AdUnit"("placement", "isActive");
+CREATE INDEX "AdUnit_placement_idx" ON "AdUnit"("placement");
 
 -- CreateIndex
 CREATE INDEX "AdUnit_priority_idx" ON "AdUnit"("priority" DESC);
@@ -174,14 +181,11 @@ CREATE UNIQUE INDEX "AdSession_sessionId_key" ON "AdSession"("sessionId");
 -- CreateIndex
 CREATE INDEX "AdSession_sessionId_idx" ON "AdSession"("sessionId");
 
--- CreateIndex
-CREATE INDEX "AdSession_updatedAt_idx" ON "AdSession"("updatedAt");
-
 -- AddForeignKey
 ALTER TABLE "Video" ADD CONSTRAINT "Video_categoryId_fkey" FOREIGN KEY ("categoryId") REFERENCES "Category"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "VideoTag" ADD CONSTRAINT "VideoTag_videoId_fkey" FOREIGN KEY ("videoId") REFERENCES "Video"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "VideoTag" ADD CONSTRAINT "VideoTag_videoId_fkey" FOREIGN KEY ("videoId") REFERENCES "Video"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "VideoTag" ADD CONSTRAINT "VideoTag_tagId_fkey" FOREIGN KEY ("tagId") REFERENCES "Tag"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "VideoTag" ADD CONSTRAINT "VideoTag_tagId_fkey" FOREIGN KEY ("tagId") REFERENCES "Tag"("id") ON DELETE CASCADE ON UPDATE CASCADE;

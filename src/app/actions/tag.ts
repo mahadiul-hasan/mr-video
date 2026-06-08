@@ -148,17 +148,44 @@ export async function createTag(data: { name: string; slug: string }) {
   const parsed = tagSchema.parse(data);
   const slug = slugify(parsed.slug || parsed.name);
 
-  const result = await prisma.tag.create({
-    data: {
-      name: parsed.name,
-      slug: slug,
+  try {
+    const result = await prisma.tag.create({
+      data: {
+        name: parsed.name,
+        slug: slug,
+      },
+    });
+
+    await invalidateAllTagCaches(slug);
+
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to create tag",
+    };
+  }
+}
+
+export async function getTagById(id: string) {
+  await requireAdmin(); // Only admins can view tag details
+  const parsedId = idSchema.parse(id);
+
+  return getCachedData(
+    `admin:tag:${parsedId}`,
+    async () => {
+      const tag = await prisma.tag.findUnique({
+        where: { id: parsedId },
+      });
+
+      if (!tag) {
+        throw new Error("Tag not found");
+      }
+
+      return tag;
     },
-  });
-
-  // Invalidate all tag caches
-  await invalidateAllTagCaches(slug);
-
-  return result;
+    CACHE_TTL.MEDIUM,
+  );
 }
 
 export async function updateTag(
@@ -169,7 +196,6 @@ export async function updateTag(
   const parsedId = idSchema.parse(id);
   const parsed = tagSchema.partial().parse(data);
 
-  // Get current tag to know old slug
   const currentTag = await prisma.tag.findUnique({
     where: { id: parsedId },
     select: { slug: true },
@@ -177,21 +203,27 @@ export async function updateTag(
 
   const newSlug = slugify(parsed.slug || parsed.name || currentTag?.slug || "");
 
-  const result = await prisma.tag.update({
-    where: { id: parsedId },
-    data: {
-      ...(parsed.name ? { name: parsed.name } : {}),
-      ...(parsed.slug || parsed.name ? { slug: newSlug } : {}),
-    },
-  });
+  try {
+    const result = await prisma.tag.update({
+      where: { id: parsedId },
+      data: {
+        ...(parsed.name ? { name: parsed.name } : {}),
+        ...(parsed.slug || parsed.name ? { slug: newSlug } : {}),
+      },
+    });
 
-  // Invalidate old and new tag caches
-  if (currentTag?.slug) {
-    await invalidateAllTagCaches(currentTag.slug);
+    if (currentTag?.slug) {
+      await invalidateAllTagCaches(currentTag.slug);
+    }
+    await invalidateAllTagCaches(newSlug);
+
+    return { success: true, data: result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to update tag",
+    };
   }
-  await invalidateAllTagCaches(newSlug);
-
-  return result;
 }
 
 export async function bulkDeleteTags(ids: string[]) {

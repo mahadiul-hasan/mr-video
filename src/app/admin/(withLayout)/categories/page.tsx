@@ -1,30 +1,59 @@
+// app/admin/categories/page.tsx
 import { getCategories, getCategoryCount } from "@/app/actions/category";
-import CategoryTable from "@/components/admin/categories/category-table";
-import { Metadata } from "next";
+import { CategoryTable } from "@/components/admin/categories/category-table";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Plus } from "lucide-react";
+import Link from "next/link";
 
-export const metadata: Metadata = {
-  title: "MR Video | Category Management",
-  description: "Manage video categories for MR Video.",
+type Props = {
+  searchParams: Promise<{
+    page?: string;
+    search?: string;
+  }>;
 };
 
-export default async function Page({
-  searchParams,
-}: {
-  searchParams: Promise<{ page?: string; search?: string }>;
-}) {
+export const metadata = {
+  title: "Categories - Admin",
+  description: "Manage categories",
+};
+
+export default async function CategoriesPage({ searchParams }: Props) {
   const params = await searchParams;
-
-  const page = Number(params.page || 1);
+  const page = params.page ? parseInt(params.page) : 1;
   const search = params.search || "";
+  const limit = 10;
 
-  const [data, total] = await Promise.all([
-    getCategories({ page, limit: 10, search }),
-    getCategoryCount(search),
-  ]);
+  // Get categories and total count using your existing functions
+  const categories = await getCategories({ page, limit, search });
+  const total = await getCategoryCount(search);
 
   return (
-    <div>
-      <CategoryTable data={data} total={total} page={page} search={search} />
+    <div className="container py-8">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold">Category Manager</h1>
+
+        <Link href="/admin/categories/create">
+          <Button className="gap-2">
+            <Plus className="h-4 w-4" />
+            Create Category
+          </Button>
+        </Link>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>All Categories</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <CategoryTable
+            categories={categories}
+            total={total}
+            currentPage={page}
+            search={search}
+          />
+        </CardContent>
+      </Card>
     </div>
   );
 }

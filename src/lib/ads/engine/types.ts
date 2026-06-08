@@ -45,16 +45,12 @@ export type MonetizationResult = {
 export type MonetizationSettings = {
   popunderEnabled: boolean;
   smartlinkEnabled: boolean;
-  interstitialEnabled: boolean;
   socialBarEnabled: boolean;
   bannerEnabled: boolean;
   nativeEnabled: boolean;
 
   smartlinkMinPerMinute: number;
   smartlinkMaxPerMinute: number;
-
-  interstitialGapSeconds: number;
-  interstitialEveryVideos: number;
 
   popunderCooldownHours: number;
 };

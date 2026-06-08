@@ -3,7 +3,6 @@ import { runAdScript } from "./executor";
 import { selectAd } from "./selector";
 import { getSession, saveSession } from "./session";
 import {
-  canTriggerInterstitial,
   canTriggerPopunder,
   canTriggerPushPrompt,
   canTriggerSmartlink,
@@ -58,8 +57,7 @@ export function createEngine({ ads, settings, onEvent }: EngineProps) {
     });
 
     // Different unlock times for different ad types
-    const unlockDelay =
-      ad.type === "INTERSTITIAL" ? 3000 : ad.type === "POPUNDER" ? 1000 : 500;
+    const unlockDelay = ad.type === "POPUNDER" ? 1000 : 500;
     window.setTimeout(() => unlock(), unlockDelay);
     return true;
   }
@@ -158,9 +156,6 @@ export function createEngine({ ads, settings, onEvent }: EngineProps) {
         case "play":
           this.videoPlay();
           break;
-        case "next-video":
-          this.nextVideo();
-          break;
         case "first-interaction":
         case "pause":
         case "seeking":
@@ -202,23 +197,6 @@ export function createEngine({ ads, settings, onEvent }: EngineProps) {
 
       // Trigger smartlink on play
       fireSmartlink("play");
-    },
-
-    // Next video handler (for interstitial ads)
-    nextVideo() {
-      session.videoCount++;
-
-      // Check for interstitial between videos
-      if (canTriggerInterstitial(session, settings)) {
-        const ad = selectAd(ads, "INTERSTITIAL", session);
-        if (fire(ad, "next-video")) {
-          session.interstitialCount++;
-          session.lastInterstitial = Date.now();
-          saveSession(session);
-        }
-      }
-
-      saveSession(session);
     },
 
     // Time update handler (for social bar at 30 seconds)
@@ -266,8 +244,6 @@ export function createEngine({ ads, settings, onEvent }: EngineProps) {
         windowStart: Date.now(),
         lastSmartTrigger: 0,
         popunderShown: false,
-        interstitialCount: 0,
-        lastInterstitial: 0,
         pushPromptShown: false,
         videoCount: 0,
         popunderShownAt: null,

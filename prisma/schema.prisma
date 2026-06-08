@@ -21,13 +21,14 @@ model Video {
   id            String   @id @default(uuid())
   title         String
   slug          String   @unique
-  description   String?
 
-  cloudinaryId  String
+  r2Key         String   @unique
   hlsUrl        String
 
   thumbnailUrl  String
   duration      Int
+  status        VideoStatus @default(PROCESSING)
+  processingError String?
 
   views         Int      @default(0)
   isPublished   Boolean  @default(false)
@@ -42,8 +43,15 @@ model Video {
 
   @@index([isPublished, createdAt(sort: Desc)])
   @@index([categoryId, isPublished])
+  @@index([status, isPublished, createdAt(sort: Desc)])
   @@index([views(sort: Desc)])
   @@index([createdAt(sort: Desc)])
+}
+
+enum VideoStatus {
+  PROCESSING
+  READY
+  FAILED
 }
 
 model Category {
@@ -117,7 +125,6 @@ enum AdType {
   NATIVE_BANNER
   BANNER
   SMARTLINK
-  INTERSTITIAL
 }
 
 model AdSetting {
@@ -126,7 +133,6 @@ model AdSetting {
   // 🔥 global toggles
   popunderEnabled     Boolean @default(true)
   smartlinkEnabled    Boolean @default(true)
-  interstitialEnabled Boolean @default(true)
   socialBarEnabled    Boolean @default(true)
   bannerEnabled       Boolean @default(true)
   nativeEnabled       Boolean @default(true)
@@ -135,15 +141,11 @@ model AdSetting {
   smartlinkMinPerMinute Int @default(2)
   smartlinkMaxPerMinute Int @default(3)
 
-  interstitialGapSeconds  Int @default(60)
-  interstitialEveryVideos Int @default(3)
-
   popunderCooldownHours Int @default(24)
 
   // 🧠 scoring weights (NEW → connects to score.ts)
   weightSmartlink     Int @default(100)
   weightPopunder      Int @default(120)
-  weightInterstitial  Int @default(90)
   weightSocialBar     Int @default(70)
   weightBanner        Int @default(40)
   weightNative        Int @default(50)
@@ -159,11 +161,9 @@ model AdSession {
   videoCount Int @default(0)
 
   smartClicks Int @default(0)
-  interstitialCount Int @default(0)
 
   // ⏱ timing signals (rules.ts uses this)
   lastSmartTrigger DateTime?
-  lastInterstitial DateTime?
   lastPopunder DateTime?
 
   // 🧠 engine score cache (optional optimization)

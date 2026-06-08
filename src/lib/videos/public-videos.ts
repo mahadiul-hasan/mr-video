@@ -12,7 +12,6 @@ export type PublicVideo = {
   id: string;
   slug: string;
   title: string;
-  description: string;
   duration: string;
   durationSeconds: number;
   views: string;
@@ -27,7 +26,6 @@ const publicVideoSelect = {
   id: true,
   slug: true,
   title: true,
-  description: true,
   duration: true,
   views: true,
   thumbnailUrl: true,
@@ -57,7 +55,7 @@ export async function getPublicVideos({
     cacheKey,
     async () => {
       const videos = await prisma.video.findMany({
-        where: { isPublished: true },
+        where: { isPublished: true, status: "READY" },
         select: publicVideoSelect,
         orderBy: { createdAt: "desc" },
         skip: (page - 1) * limit,
@@ -94,9 +92,9 @@ export async function searchPublicVideos({
       const videos = await prisma.video.findMany({
         where: {
           isPublished: true,
+          status: "READY",
           OR: [
             { title: { contains: search, mode: "insensitive" } },
-            { description: { contains: search, mode: "insensitive" } },
             { category: { name: { contains: search, mode: "insensitive" } } },
             {
               tags: {
@@ -140,7 +138,7 @@ export async function getPublicVideosByCategory({
       if (!category) return null;
 
       const videos = await prisma.video.findMany({
-        where: { isPublished: true, categoryId: category.id },
+        where: { isPublished: true, status: "READY", categoryId: category.id },
         select: publicVideoSelect,
         orderBy: { createdAt: "desc" },
         skip: (page - 1) * limit,
@@ -177,6 +175,7 @@ export async function getPublicVideosByTag({
       const videos = await prisma.video.findMany({
         where: {
           isPublished: true,
+          status: "READY",
           tags: { some: { tagId: tag.id } },
         },
         select: publicVideoSelect,
@@ -322,6 +321,7 @@ export async function getPublicVideoBySlug(slug: string) {
         where: {
           slug,
           isPublished: true,
+          status: "READY",
         },
         select: publicVideoSelect,
       });
@@ -348,6 +348,7 @@ export async function getRelatedPublicVideos({
       const videos = await prisma.video.findMany({
         where: {
           isPublished: true,
+          status: "READY",
           slug: { not: slug },
           ...(category && category !== "Uncategorized"
             ? { category: { name: category } }
@@ -423,7 +424,6 @@ function mapPublicVideo(video: {
   id: string;
   slug: string;
   title: string;
-  description: string | null;
   duration: number;
   views: number;
   thumbnailUrl: string;
@@ -435,7 +435,6 @@ function mapPublicVideo(video: {
     id: video.id,
     slug: video.slug,
     title: video.title,
-    description: video.description ?? "",
     duration: formatDuration(video.duration),
     durationSeconds: video.duration,
     views: formatViews(video.views),

@@ -1,15 +1,24 @@
 "use client";
 
+import { useTransition, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
-
+import Link from "next/link";
 import { deleteCategory, bulkDeleteCategories } from "@/app/actions/category";
-
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-
-import CategoryForm from "@/components/admin/categories/category-form";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { Edit, Trash2, Search } from "lucide-react";
 import DeleteDialog from "@/components/ui/delete-dialog";
+import { toast } from "sonner";
 
 type Category = {
   id: string;
@@ -17,114 +26,108 @@ type Category = {
   slug: string;
 };
 
-export default function CategoryTable({
-  data,
-  total,
-  page,
-  search,
-}: {
-  data: Category[];
+type CategoryTableProps = {
+  categories: Category[];
   total: number;
-  page: number;
+  currentPage: number;
   search: string;
-}) {
+};
+
+export function CategoryTable({
+  categories,
+  total,
+  currentPage,
+  search,
+}: CategoryTableProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-
   const [searchInput, setSearchInput] = useState(search || "");
   const [selected, setSelected] = useState<string[]>([]);
-
-  const [editItem, setEditItem] = useState<Category | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const limit = 10;
   const totalPages = Math.ceil(total / limit);
 
-  // ---------------- SEARCH ----------------
-  function handleSearch() {
-    router.push(`/admin/categories?page=1&search=${searchInput}`);
-  }
+  const handleSearch = () => {
+    router.push(
+      `/admin/categories?page=1&search=${encodeURIComponent(searchInput)}`,
+    );
+  };
 
-  // ---------------- PAGINATION ----------------
-  function goToPage(p: number) {
-    router.push(`/admin/categories?page=${p}&search=${search}`);
-  }
+  const goToPage = (page: number) => {
+    router.push(
+      `/admin/categories?page=${page}&search=${encodeURIComponent(search)}`,
+    );
+  };
 
-  // ---------------- SELECT ----------------
-  function toggleSelect(id: string) {
+  const toggleSelect = (id: string) => {
     setSelected((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
-  }
+  };
 
-  function toggleSelectAll() {
-    if (selected.length === data.length) {
+  const toggleSelectAll = () => {
+    if (selected.length === categories.length) {
       setSelected([]);
     } else {
-      setSelected(data.map((d) => d.id));
+      setSelected(categories.map((c) => c.id));
     }
-  }
+  };
 
-  // ---------------- BULK DELETE ----------------
-  function handleBulkDelete() {
+  const handleBulkDelete = () => {
     startTransition(async () => {
-      await bulkDeleteCategories(selected);
-      setSelected([]);
-      router.refresh();
+      const result = await bulkDeleteCategories(selected);
+      if (result.success) {
+        toast.success(
+          `Deleted ${selected.length} category${selected.length > 1 ? "ies" : "y"} successfully.`,
+          {
+            position: "top-right",
+          },
+        );
+        setSelected([]);
+        router.refresh();
+      } else {
+        toast.error(result.error || "Failed to delete categories", {
+          position: "top-right",
+        });
+      }
     });
-  }
+  };
 
-  // ---------------- SINGLE DELETE ----------------
-  function handleDelete() {
+  const handleDelete = () => {
     if (!deleteId) return;
 
     startTransition(async () => {
-      await deleteCategory(deleteId);
-      setDeleteId(null);
-      router.refresh();
+      const result = await deleteCategory(deleteId);
+      if (result.success) {
+        toast.success("Category deleted successfully.", {
+          position: "top-right",
+        });
+        setDeleteId(null);
+        router.refresh();
+      } else {
+        toast.error(result.error || "Failed to delete category", {
+          position: "top-right",
+        });
+      }
     });
-  }
+  };
 
   return (
     <div className="space-y-4">
-      {/* HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <h1 className="text-lg font-semibold">Categories</h1>
-
-        <Button
-          onClick={() =>
-            setEditItem({
-              id: "",
-              name: "",
-              slug: "",
-            })
-          }
-        >
-          + Create
-        </Button>
-      </div>
-
-      {/* FORM */}
-      {editItem && (
-        <CategoryForm
-          key={editItem.id || "create"}
-          initialData={editItem?.id ? editItem : null}
-          onSuccess={() => {
-            setEditItem(null);
-            router.refresh();
-          }}
-        />
-      )}
-
-      {/* SEARCH + BULK */}
-      <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-        <Input
-          placeholder="Search categories..."
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-        />
-
-        <Button onClick={handleSearch}>Search</Button>
+      {/* Search and Bulk Actions */}
+      <div className="flex flex-col sm:flex-row gap-2">
+        <div className="flex-1 flex gap-2">
+          <Input
+            placeholder="Search categories..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+          />
+          <Button onClick={handleSearch} variant="secondary" size="icon">
+            <Search className="h-4 w-4" />
+          </Button>
+        </div>
 
         {selected.length > 0 && (
           <Button
@@ -132,92 +135,117 @@ export default function CategoryTable({
             onClick={handleBulkDelete}
             disabled={isPending}
           >
-            Delete ({selected.length})
+            Delete Selected ({selected.length})
           </Button>
         )}
       </div>
 
-      {/* TABLE WRAPPER (RESPONSIVE CORE FIX) */}
-      <div className="border rounded-md overflow-x-auto">
-        <table className="w-full min-w-150 text-sm">
-          <thead className="bg-muted border-b">
-            <tr>
-              <th className="p-2 text-left w-10">
-                <input
-                  type="checkbox"
-                  checked={selected.length === data.length && data.length > 0}
-                  onChange={toggleSelectAll}
+      {/* Table */}
+      <div className="border rounded-md">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-10">
+                <Checkbox
+                  checked={
+                    selected.length === categories.length &&
+                    categories.length > 0
+                  }
+                  onCheckedChange={toggleSelectAll}
                 />
-              </th>
-
-              <th className="p-2 text-left">Name</th>
-              <th className="p-2 text-left">Slug</th>
-              <th className="p-2 text-right">Actions</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {data.map((cat) => (
-              <tr
-                key={cat.id}
-                className="border-b hover:bg-muted/50 transition"
-              >
-                {/* SELECT */}
-                <td className="p-2">
-                  <input
-                    type="checkbox"
-                    checked={selected.includes(cat.id)}
-                    onChange={() => toggleSelect(cat.id)}
+              </TableHead>
+              <TableHead>Name</TableHead>
+              <TableHead>Slug</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {categories.map((category) => (
+              <TableRow key={category.id}>
+                <TableCell>
+                  <Checkbox
+                    checked={selected.includes(category.id)}
+                    onCheckedChange={() => toggleSelect(category.id)}
                   />
-                </td>
-
-                {/* DATA */}
-                <td className="p-2 font-medium">{cat.name}</td>
-
-                <td className="p-2 text-muted-foreground">{cat.slug}</td>
-
-                {/* ACTIONS */}
-                <td className="p-2">
-                  <div className="flex justify-end gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setEditItem(cat)}
-                    >
-                      Edit
+                </TableCell>
+                <TableCell className="font-medium">{category.name}</TableCell>
+                <TableCell>
+                  <Badge variant="outline">{category.slug}</Badge>
+                </TableCell>
+                <TableCell className="text-right space-x-2">
+                  <Link href={`/admin/categories/${category.id}/edit`}>
+                    <Button size="sm" variant="outline">
+                      <Edit className="h-4 w-4" />
                     </Button>
-
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => setDeleteId(cat.id)}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </td>
-              </tr>
+                  </Link>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => setDeleteId(category.id)}
+                    disabled={isPending}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
+
+        {categories.length === 0 && (
+          <div className="text-center py-8 text-muted-foreground">
+            {search
+              ? "No categories found matching your search."
+              : "No categories yet. Create your first category!"}
+          </div>
+        )}
       </div>
 
-      {/* PAGINATION */}
-      {total > limit && (
-        <div className="flex flex-wrap gap-2">
-          {Array.from({ length: totalPages }).map((_, i) => (
-            <Button
-              key={i}
-              variant={page === i + 1 ? "default" : "outline"}
-              onClick={() => goToPage(i + 1)}
-            >
-              {i + 1}
-            </Button>
-          ))}
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex flex-wrap justify-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => goToPage(currentPage - 1)}
+            disabled={currentPage === 1}
+          >
+            Previous
+          </Button>
+
+          {Array.from({ length: Math.min(5, totalPages) }).map((_, i) => {
+            let pageNum;
+            if (totalPages <= 5) {
+              pageNum = i + 1;
+            } else if (currentPage <= 3) {
+              pageNum = i + 1;
+            } else if (currentPage >= totalPages - 2) {
+              pageNum = totalPages - 4 + i;
+            } else {
+              pageNum = currentPage - 2 + i;
+            }
+
+            return (
+              <Button
+                key={pageNum}
+                variant={currentPage === pageNum ? "default" : "outline"}
+                onClick={() => goToPage(pageNum)}
+              >
+                {pageNum}
+              </Button>
+            );
+          })}
+
+          <Button
+            variant="outline"
+            onClick={() => goToPage(currentPage + 1)}
+            disabled={currentPage === totalPages}
+          >
+            Next
+          </Button>
         </div>
       )}
 
-      {/* DELETE CONFIRM */}
+      {/* Delete Dialog */}
       <DeleteDialog
         open={!!deleteId}
         onOpenChange={() => setDeleteId(null)}

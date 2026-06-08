@@ -16,7 +16,6 @@ const TYPES: AdType[] = [
   "NATIVE_BANNER",
   "BANNER",
   "SMARTLINK",
-  "INTERSTITIAL",
 ];
 
 export default function TypeSelect({

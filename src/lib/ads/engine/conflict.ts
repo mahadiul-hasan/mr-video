@@ -15,7 +15,6 @@ export function canRun() {
 export function resolveConflict(type: string, lastType?: string) {
   // hard rules
   if (lastType === "POPUNDER" && type === "SMARTLINK") return false;
-  if (lastType === "INTERSTITIAL" && type === "SMARTLINK") return false;
 
   return true;
 }

@@ -2,31 +2,45 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
-import { bulkDeleteVideos, deleteVideo } from "@/app/actions/video";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import DeleteDialog from "@/components/ui/delete-dialog";
 import { Input } from "@/components/ui/input";
-import VideoForm, { type VideoFormData } from "./video-form";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { Edit, Trash2, Search, Eye, Plus } from "lucide-react";
+import { bulkDeleteVideos, deleteVideo } from "@/app/actions/video";
 
-type Option = {
+type Option = { id: string; name: string };
+
+type VideoRow = {
   id: string;
-  name: string;
-};
-
-type VideoRow = VideoFormData & {
+  title: string;
+  slug: string;
   thumbnailUrl: string;
   duration: number;
+  status: "PROCESSING" | "READY" | "FAILED";
+  processingError?: string | null;
   views: number;
   createdAt: Date;
+  isPublished: boolean;
   category: Option | null;
+  tags: { tag: Option }[];
 };
 
 function formatDuration(seconds: number) {
-  const safeSeconds = Math.max(seconds, 0);
-  const minutes = Math.floor(safeSeconds / 60);
-  const remainingSeconds = safeSeconds % 60;
-  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
 export default function VideoTable({
@@ -34,242 +48,239 @@ export default function VideoTable({
   total,
   page,
   search,
-  categories,
-  tags,
-  uploadConfig,
 }: {
   data: VideoRow[];
   total: number;
   page: number;
   search: string;
-  categories: Option[];
-  tags: Option[];
-  uploadConfig: {
-    cloudName: string;
-    uploadPreset: string;
-  };
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [searchInput, setSearchInput] = useState(search || "");
   const [selected, setSelected] = useState<string[]>([]);
-  const [editItem, setEditItem] = useState<VideoFormData | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const limit = 10;
   const totalPages = Math.ceil(total / limit);
 
-  function handleSearch() {
-    router.push(`/admin/videos?page=1&search=${encodeURIComponent(searchInput)}`);
-  }
-
-  function goToPage(nextPage: number) {
+  const handleSearch = () =>
     router.push(
-      `/admin/videos?page=${nextPage}&search=${encodeURIComponent(search)}`,
+      `/admin/videos?page=1&search=${encodeURIComponent(searchInput)}`,
     );
-  }
+  const goToPage = (p: number) =>
+    router.push(`/admin/videos?page=${p}&search=${encodeURIComponent(search)}`);
 
-  function toggleSelect(id: string) {
+  const toggleSelect = (id: string) =>
     setSelected((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id],
     );
-  }
-
-  function toggleSelectAll() {
+  const toggleSelectAll = () =>
     setSelected((prev) =>
-      prev.length === data.length ? [] : data.map((video) => video.id ?? ""),
+      prev.length === data.length ? [] : data.map((v) => v.id),
     );
-  }
 
-  function handleBulkDelete() {
+  const handleBulkDelete = () => {
     startTransition(async () => {
       try {
         await bulkDeleteVideos(selected);
         setSelected([]);
-        toast.success("Videos deleted");
+        toast.success(`Deleted ${selected.length} video(s) successfully`, {
+          position: "top-right",
+        });
         router.refresh();
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Delete failed");
+        toast.error(error instanceof Error ? error.message : "Delete failed", {
+          position: "top-right",
+        });
       }
     });
-  }
+  };
 
-  function handleDelete() {
+  const handleDelete = () => {
     if (!deleteId) return;
-
     startTransition(async () => {
       try {
         await deleteVideo(deleteId);
         setDeleteId(null);
-        toast.success("Video deleted");
+        toast.success("Video deleted successfully", { position: "top-right" });
         router.refresh();
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Delete failed");
+        toast.error(error instanceof Error ? error.message : "Delete failed", {
+          position: "top-right",
+        });
       }
     });
-  }
+  };
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-lg font-semibold">Videos</h1>
-          <p className="text-sm text-muted-foreground">
-            Create, edit, publish, search, and remove uploaded videos.
-          </p>
-        </div>
-
-        <Button
-          onClick={() =>
-            setEditItem({
-              title: "",
-              slug: "",
-              description: "",
-              categoryId: null,
-              isPublished: false,
-              tags: [],
-            })
-          }
-        >
-          + Create
-        </Button>
-      </div>
-
-      {editItem && (
-        <VideoForm
-          key={editItem.id ?? "create"}
-          initialData={editItem.id ? editItem : null}
-          categories={categories}
-          tags={tags}
-          uploadConfig={uploadConfig}
-          onSuccess={() => {
-            setEditItem(null);
-            router.refresh();
-          }}
-        />
-      )}
-
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <Input
-          placeholder="Search videos, categories, tags..."
-          value={searchInput}
-          onChange={(event) => setSearchInput(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") handleSearch();
-          }}
-        />
-        <Button onClick={handleSearch}>Search</Button>
-        {selected.length > 0 && (
-          <Button
-            variant="destructive"
-            onClick={handleBulkDelete}
-            disabled={isPending}
-          >
-            Delete ({selected.length})
+        <div className="flex-1 flex gap-2">
+          <Input
+            placeholder="Search videos..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+          />
+          <Button onClick={handleSearch} size="icon">
+            <Search className="h-4 w-4" />
           </Button>
-        )}
+        </div>
+        <Link href="/admin/videos/create">
+          <Button className="gap-2">
+            <Plus className="h-4 w-4" />
+            Upload Video
+          </Button>
+        </Link>
       </div>
 
-      <div className="overflow-x-auto rounded-md border">
-        <table className="w-full min-w-225 text-sm">
-          <thead className="border-b bg-muted">
-            <tr>
-              <th className="w-10 p-2 text-left">
-                <input
-                  type="checkbox"
+      <div className="border rounded-md">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-10">
+                <Checkbox
                   checked={selected.length === data.length && data.length > 0}
-                  onChange={toggleSelectAll}
+                  onCheckedChange={toggleSelectAll}
                 />
-              </th>
-              <th className="p-2 text-left">Video</th>
-              <th className="p-2 text-left">Category</th>
-              <th className="p-2 text-left">Tags</th>
-              <th className="p-2 text-left">Status</th>
-              <th className="p-2 text-left">Views</th>
-              <th className="p-2 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.length === 0 && (
-              <tr>
-                <td colSpan={7} className="p-6 text-center text-muted-foreground">
-                  No videos found.
-                </td>
-              </tr>
-            )}
-
+              </TableHead>
+              <TableHead>Video</TableHead>
+              <TableHead>Category</TableHead>
+              <TableHead>Tags</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Views</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {data.map((video) => (
-              <tr key={video.id} className="border-b transition hover:bg-muted/50">
-                <td className="p-2">
-                  <input
-                    type="checkbox"
-                    checked={selected.includes(video.id ?? "")}
-                    onChange={() => toggleSelect(video.id ?? "")}
+              <TableRow key={video.id}>
+                <TableCell>
+                  <Checkbox
+                    checked={selected.includes(video.id)}
+                    onCheckedChange={() => toggleSelect(video.id)}
                   />
-                </td>
-                <td className="p-2">
+                </TableCell>
+                <TableCell>
                   <div className="flex items-center gap-3">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={video.thumbnailUrl}
                       alt=""
                       className="h-14 w-24 rounded-md object-cover"
                     />
-                    <div className="min-w-0">
-                      <p className="truncate font-medium">{video.title}</p>
+                    <div>
+                      <p className="font-medium truncate max-w-48">
+                        {video.title}
+                      </p>
                       <p className="text-xs text-muted-foreground">
-                        {video.slug} · {formatDuration(video.duration)}
+                        {formatDuration(video.duration)}
                       </p>
                     </div>
                   </div>
-                </td>
-                <td className="p-2 text-muted-foreground">
-                  {video.category?.name ?? "None"}
-                </td>
-                <td className="p-2 text-muted-foreground">
-                  {video.tags.map((item) => item.tag.name).join(", ") || "None"}
-                </td>
-                <td className="p-2">
-                  <span className="rounded-md border px-2 py-1 text-xs">
-                    {video.isPublished ? "Published" : "Draft"}
-                  </span>
-                </td>
-                <td className="p-2 text-muted-foreground">{video.views}</td>
-                <td className="p-2">
-                  <div className="flex justify-end gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setEditItem(video)}
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => setDeleteId(video.id ?? null)}
-                    >
-                      Delete
-                    </Button>
+                </TableCell>
+                <TableCell>
+                  <Badge variant="outline">
+                    {video.category?.name ?? "None"}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-muted-foreground max-w-48 truncate">
+                  {video.tags.map((t) => t.tag.name).join(", ") || "—"}
+                </TableCell>
+                <TableCell>
+                  <div className="space-y-1">
+                    <Badge variant={video.isPublished ? "default" : "secondary"}>
+                      {video.isPublished ? "Published" : "Draft"}
+                    </Badge>
+                    <div>
+                      <Badge
+                        variant={
+                          video.status === "READY"
+                            ? "default"
+                            : video.status === "FAILED"
+                              ? "destructive"
+                              : "secondary"
+                        }
+                      >
+                        {video.status.toLowerCase()}
+                      </Badge>
+                    </div>
+                    {video.status === "FAILED" && video.processingError && (
+                      <p
+                        className="text-xs text-destructive max-w-56 truncate"
+                        title={video.processingError}
+                      >
+                        {video.processingError}
+                      </p>
+                    )}
                   </div>
-                </td>
-              </tr>
+                </TableCell>
+                <TableCell>{video.views.toLocaleString()}</TableCell>
+                <TableCell className="text-right space-x-2">
+                  <Link href={`/admin/videos/${video.id}/edit`}>
+                    <Button size="sm" variant="outline">
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                  </Link>
+                  <Link href={`/watch/${video.slug}`} target="_blank">
+                    <Button size="sm" variant="outline">
+                      <Eye className="h-4 w-4" />
+                    </Button>
+                  </Link>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => setDeleteId(video.id)}
+                    disabled={isPending}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
+        {data.length === 0 && (
+          <div className="text-center py-8 text-muted-foreground">
+            No videos found. Click "Upload Video" to get started.
+          </div>
+        )}
       </div>
 
-      {total > limit && (
-        <div className="flex flex-wrap gap-2">
-          {Array.from({ length: totalPages }).map((_, index) => (
-            <Button
-              key={index}
-              variant={page === index + 1 ? "default" : "outline"}
-              onClick={() => goToPage(index + 1)}
-            >
-              {index + 1}
-            </Button>
-          ))}
+      {totalPages > 1 && (
+        <div className="flex flex-wrap justify-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => goToPage(page - 1)}
+            disabled={page === 1}
+          >
+            Previous
+          </Button>
+          {Array.from({ length: Math.min(5, totalPages) }).map((_, i) => {
+            let pageNum =
+              totalPages <= 5
+                ? i + 1
+                : page <= 3
+                  ? i + 1
+                  : page >= totalPages - 2
+                    ? totalPages - 4 + i
+                    : page - 2 + i;
+            return (
+              <Button
+                key={pageNum}
+                variant={page === pageNum ? "default" : "outline"}
+                onClick={() => goToPage(pageNum)}
+              >
+                {pageNum}
+              </Button>
+            );
+          })}
+          <Button
+            variant="outline"
+            onClick={() => goToPage(page + 1)}
+            disabled={page === totalPages}
+          >
+            Next
+          </Button>
         </div>
       )}
 

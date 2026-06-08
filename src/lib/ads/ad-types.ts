@@ -3,5 +3,4 @@ export type AdType =
   | "SOCIAL_BAR"
   | "NATIVE_BANNER"
   | "BANNER"
-  | "SMARTLINK"
-  | "INTERSTITIAL";
+  | "SMARTLINK";

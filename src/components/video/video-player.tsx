@@ -1,131 +1,219 @@
+// components/ui/hls-video-player.tsx
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, forwardRef } from "react";
 import Hls from "hls.js";
-import { useAd } from "@/components/providers/ad-provider";
-import type { PublicVideo } from "@/lib/videos/public-videos";
 
-type VideoPlayerProps = {
-  video: PublicVideo;
+type HLSVideoPlayerProps = {
+  src: string; // HLS URL (.m3u8)
+  poster?: string;
+  className?: string;
+  autoPlay?: boolean;
+  controls?: boolean;
+  onPlay?: () => void;
+  onPause?: () => void;
+  onTimeUpdate?: (currentTime: number) => void;
+  onLoaded?: () => void;
 };
 
-export function VideoPlayer({ video }: VideoPlayerProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const plyrRef = useRef<any>(null);
-  const hlsRef = useRef<Hls | null>(null);
-  const ad = useAd();
+export const VideoPlayer = forwardRef<HTMLVideoElement, HLSVideoPlayerProps>(
+  (
+    {
+      src,
+      poster,
+      className = "",
+      autoPlay = false,
+      controls = true,
+      onPlay,
+      onPause,
+      onTimeUpdate,
+      onLoaded,
+    },
+    ref,
+  ) => {
+    const internalRef = useRef<HTMLVideoElement>(null);
+    const videoRef = (ref || internalRef) as React.RefObject<HTMLVideoElement>;
+    const hlsRef = useRef<Hls | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
-  // Initialize video player
-  useEffect(() => {
-    const element = videoRef.current;
-    if (!element) return;
+    useEffect(() => {
+      const video = videoRef.current;
+      if (!video || !src) return;
 
-    // Setup HLS
-    const isHls = video.hlsUrl?.includes(".m3u8");
+      setIsLoading(true);
+      setError(null);
 
-    if (isHls && Hls.isSupported()) {
-      const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: true,
-      });
-      hls.loadSource(video.hlsUrl);
-      hls.attachMedia(element);
-      hlsRef.current = hls;
+      const isHLS = src?.includes(".m3u8") || src?.includes(".m3u");
 
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        // Ready to play
-      });
-    } else if (isHls && element.canPlayType("application/vnd.apple.mpegurl")) {
-      element.src = video.hlsUrl;
-    } else {
-      element.src = video.mp4Url;
-    }
-
-    // Dynamically import Plyr with proper initialization
-    const initPlyr = async () => {
-      try {
-        // Import CSS first
-        await import("plyr/dist/plyr.css");
-        // Then import Plyr
-        const PlyrModule = await import("plyr");
-        const Plyr = PlyrModule.default;
-
-        const plyr = new Plyr(element, {
-          controls: [
-            "play-large",
-            "play",
-            "progress",
-            "current-time",
-            "mute",
-            "volume",
-            "settings",
-            "fullscreen",
-          ],
-          settings: ["quality", "speed"],
-        });
-
-        plyrRef.current = plyr;
-
-        // Plyr event listeners
-        plyr.on("play", () => ad.onPlay());
-        plyr.on("pause", () => ad.onPause());
-        plyr.on("seeking", () => ad.onSeeking());
-        plyr.on("volumechange", () => ad.onVolumeChange());
-        plyr.on("enterfullscreen", () => ad.onFullscreen());
-        plyr.on("timeupdate", () => {
-          const currentTime = videoRef.current?.currentTime ?? 0;
-          ad.onTimeUpdate(currentTime);
-        });
-      } catch (error) {}
-    };
-
-    initPlyr();
-
-    return () => {
-      if (plyrRef.current) {
-        plyrRef.current.destroy();
-        plyrRef.current = null;
-      }
+      // Clean up previous HLS instance
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
-    };
-  }, [video.hlsUrl, video.mp4Url, ad]);
 
-  // Track first interaction
-  useEffect(() => {
-    let firstInteraction = false;
+      if (isHLS && Hls.isSupported()) {
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+          maxBufferLength: 30,
+          maxMaxBufferLength: 60,
+          manifestLoadingTimeOut: 10000,
+          manifestLoadingMaxRetry: 3,
+          levelLoadingTimeOut: 10000,
+          levelLoadingMaxRetry: 3,
+        });
 
-    const handleInteraction = () => {
-      if (firstInteraction) return;
-      firstInteraction = true;
-      ad.onInteraction();
-    };
+        hls.loadSource(src);
+        hls.attachMedia(video);
+        hlsRef.current = hls;
 
-    const element = videoRef.current;
-    if (element) {
-      element.addEventListener("click", handleInteraction);
-      element.addEventListener("touchstart", handleInteraction);
-    }
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          setIsLoading(false);
+          onLoaded?.();
+          if (autoPlay) {
+            video.play().catch((err) => {
+              console.error("Auto-play failed:", err);
+              setError("Auto-play was blocked. Click play to start.");
+            });
+          }
+        });
 
-    return () => {
-      if (element) {
-        element.removeEventListener("click", handleInteraction);
-        element.removeEventListener("touchstart", handleInteraction);
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data.fatal) {
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                console.error("HLS Network error, trying to recover...");
+                hls.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                console.error("HLS Media error, trying to recover...");
+                hls.recoverMediaError();
+                break;
+              default:
+                console.error("HLS Fatal error:", data);
+                setError("Unable to play this video. Please try again later.");
+                setIsLoading(false);
+                break;
+            }
+          } else {
+            // Non-fatal error - just log it
+            console.warn("HLS non-fatal error:", data.type, data.details);
+          }
+        });
+
+        return () => {
+          hls.destroy();
+          hlsRef.current = null;
+        };
+      } else if (isHLS && video.canPlayType("application/vnd.apple.mpegurl")) {
+        // Safari native HLS support
+        video.src = src;
+
+        const handleLoadedMetadata = () => {
+          setIsLoading(false);
+          onLoaded?.();
+          if (autoPlay) {
+            video.play().catch((err) => {
+              console.error("Auto-play failed:", err);
+              setError("Auto-play was blocked. Click play to start.");
+            });
+          }
+          video.removeEventListener("loadedmetadata", handleLoadedMetadata);
+        };
+
+        video.addEventListener("loadedmetadata", handleLoadedMetadata);
+
+        return () => {
+          video.removeEventListener("loadedmetadata", handleLoadedMetadata);
+        };
+      } else if (!isHLS) {
+        // Direct MP4 or other format
+        video.src = src;
+
+        const handleLoadedMetadata = () => {
+          setIsLoading(false);
+          onLoaded?.();
+          if (autoPlay) {
+            video.play().catch((err) => {
+              console.error("Auto-play failed:", err);
+              setError("Auto-play was blocked. Click play to start.");
+            });
+          }
+          video.removeEventListener("loadedmetadata", handleLoadedMetadata);
+        };
+
+        video.addEventListener("loadedmetadata", handleLoadedMetadata);
+
+        return () => {
+          video.removeEventListener("loadedmetadata", handleLoadedMetadata);
+        };
+      } else {
+        setError("HLS is not supported in this browser");
+        setIsLoading(false);
       }
-    };
-  }, [ad]);
 
-  return (
-    <div className="relative overflow-hidden rounded-md border border-border bg-black">
-      <video
-        ref={videoRef}
-        className="aspect-video w-full bg-black"
-        poster={video.poster}
-        preload="metadata"
-        playsInline
-      />
-    </div>
-  );
-}
+      return () => {
+        if (video) {
+          video.pause();
+          video.src = "";
+        }
+      };
+    }, [src, autoPlay, onLoaded, videoRef]);
+
+    // Event listeners
+    useEffect(() => {
+      const video = videoRef.current;
+      if (!video) return;
+
+      const handlePlay = () => onPlay?.();
+      const handlePause = () => onPause?.();
+      const handleTimeUpdate = () => onTimeUpdate?.(video.currentTime);
+
+      video.addEventListener("play", handlePlay);
+      video.addEventListener("pause", handlePause);
+      video.addEventListener("timeupdate", handleTimeUpdate);
+
+      return () => {
+        video.removeEventListener("play", handlePlay);
+        video.removeEventListener("pause", handlePause);
+        video.removeEventListener("timeupdate", handleTimeUpdate);
+      };
+    }, [onPlay, onPause, onTimeUpdate, videoRef]);
+
+    return (
+      <div className="relative w-full h-full bg-black">
+        {isLoading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
+            <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin" />
+          </div>
+        )}
+
+        {error && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-10">
+            <div className="text-center text-white p-4">
+              <p className="text-red-500 mb-2">⚠️ {error}</p>
+              <button
+                onClick={() => window.location.reload()}
+                className="px-4 py-2 bg-white text-black rounded-md text-sm hover:bg-gray-200 transition"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        )}
+
+        <video
+          ref={videoRef}
+          className={`w-full h-full ${className}`}
+          poster={poster}
+          controls={controls}
+          playsInline
+          preload="metadata"
+        />
+      </div>
+    );
+  },
+);
+
+VideoPlayer.displayName = "VideoPlayer";
