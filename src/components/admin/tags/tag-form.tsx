@@ -11,7 +11,10 @@ import { toast } from "sonner";
 import { slugify } from "@/lib/videos/slug";
 
 type TagFormProps = {
-  action: (prevState: any, formData: FormData) => Promise<any>;
+  action: (
+    prevState: TagActionState,
+    formData: FormData,
+  ) => Promise<TagActionState>;
   initialData?: {
     id?: string;
     name?: string;
@@ -19,6 +22,12 @@ type TagFormProps = {
   };
   submitLabel: string;
   redirectTo?: string;
+};
+
+type TagActionState = {
+  success: boolean;
+  error?: string | null;
+  data?: unknown;
 };
 
 export function TagForm({

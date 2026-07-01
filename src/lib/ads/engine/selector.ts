@@ -6,6 +6,7 @@ export function selectAd(
   ads: MonetizationAd[],
   type: string,
   session: AdSessionState,
+  options: { ignoreAdLimits?: boolean } = {},
 ) {
   const now = Date.now();
 
@@ -14,6 +15,7 @@ export function selectAd(
     if (ad.type !== type) return false;
 
     if (
+      !options.ignoreAdLimits &&
       ad.frequencyCap &&
       (session.shownCounts?.[ad.id] ?? 0) >= ad.frequencyCap
     ) {
@@ -21,6 +23,7 @@ export function selectAd(
     }
 
     if (
+      !options.ignoreAdLimits &&
       ad.cooldownSeconds &&
       session.lastShown?.[ad.id] &&
       now - session.lastShown[ad.id] < ad.cooldownSeconds * 1000

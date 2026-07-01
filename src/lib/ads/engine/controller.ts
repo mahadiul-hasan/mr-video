@@ -29,6 +29,7 @@ export function createEngine({ ads, settings, onEvent }: EngineProps) {
     smartForcePending: false,
     lastInteractionTime: 0,
     interactionCount: 0,
+    socialBarShown: false,
   };
 
   function fire(
@@ -40,7 +41,9 @@ export function createEngine({ ads, settings, onEvent }: EngineProps) {
     lock();
 
     const firedAt = Date.now();
-    runAdScript(ad.script);
+    if (ad.type !== "SOCIAL_BAR") {
+      runAdScript(ad.script, { renderMarkup: false });
+    }
 
     session.lastShown[ad.id] = firedAt;
     session.shownCounts[ad.id] = (session.shownCounts[ad.id] ?? 0) + 1;
@@ -63,9 +66,12 @@ export function createEngine({ ads, settings, onEvent }: EngineProps) {
   }
 
   function fireSmartlink(reason: MonetizationEvent | "smartlink-enforcement") {
+    if (isPopunderPending()) return false;
     if (!canTriggerSmartlink(session, settings)) return false;
 
-    const ad = selectAd(ads, "SMARTLINK", session);
+    const ad = selectAd(ads, "SMARTLINK", session, {
+      ignoreAdLimits: true,
+    });
     if (!fire(ad, reason)) return false;
 
     session.smartClicks++;
@@ -75,6 +81,24 @@ export function createEngine({ ads, settings, onEvent }: EngineProps) {
     runtime.interactionCount++;
     saveSession(session);
     return true;
+  }
+
+  function isPopunderPending() {
+    if (!canTriggerPopunder(session, settings)) return false;
+    return Boolean(selectAd(ads, "POPUNDER", session));
+  }
+
+  function firePopunder(reason: MonetizationResult["reason"]) {
+    if (!canTriggerPopunder(session, settings)) return false;
+
+    const ad = selectAd(ads, "POPUNDER", session);
+    if (fire(ad, reason)) {
+      session.popunderShownAt = Date.now();
+      saveSession(session);
+      return true;
+    }
+
+    return false;
   }
 
   function handleInteraction(reason: MonetizationEvent) {
@@ -87,6 +111,7 @@ export function createEngine({ ads, settings, onEvent }: EngineProps) {
 
     runtime.lastInteractionTime = now;
     runtime.interactionCount++;
+    if (firePopunder(reason)) return;
 
     // First interaction logic
     if (!runtime.firstInteractionSeen) {
@@ -137,10 +162,12 @@ export function createEngine({ ads, settings, onEvent }: EngineProps) {
     reason: MonetizationResult["reason"] = "watch-time",
   ) {
     if (!settings.socialBarEnabled) return null;
+    if (runtime.socialBarShown) return null;
 
     if (canTriggerPushPrompt(session, settings)) {
       const ad = selectAd(ads, "SOCIAL_BAR", session);
       if (fire(ad, reason)) {
+        runtime.socialBarShown = true;
         session.pushPromptShown = true;
         saveSession(session);
         return ad;
@@ -179,14 +206,7 @@ export function createEngine({ ads, settings, onEvent }: EngineProps) {
       if (typeof document !== "undefined" && document.hidden) return;
 
       // Check for popunder on video start (once per day)
-      if (canTriggerPopunder(session, settings)) {
-        const ad = selectAd(ads, "POPUNDER", session);
-        if (fire(ad, "play")) {
-          session.popunderShownAt = Date.now();
-          saveSession(session);
-          // Don't return - continue with smartlink check
-        }
-      }
+      const didPopunder = firePopunder("play");
 
       // Track video count on first play
       if (!runtime.playStarted) {
@@ -196,7 +216,7 @@ export function createEngine({ ads, settings, onEvent }: EngineProps) {
       }
 
       // Trigger smartlink on play
-      fireSmartlink("play");
+      if (!didPopunder) fireSmartlink("play");
     },
 
     // Time update handler (for social bar at 30 seconds)
@@ -210,6 +230,7 @@ export function createEngine({ ads, settings, onEvent }: EngineProps) {
       ) {
         const ad = selectAd(ads, "SOCIAL_BAR", session);
         if (fire(ad, "watch-time")) {
+          runtime.socialBarShown = true;
           session.pushPromptShown = true;
           saveSession(session);
         }
@@ -224,6 +245,43 @@ export function createEngine({ ads, settings, onEvent }: EngineProps) {
 
     // Display social bar (for watch page)
     displaySocialBar,
+
+    landingSmartlink() {
+      fireSmartlink("smartlink-enforcement");
+    },
+
+    landingSocialBar() {
+      if (!settings.socialBarEnabled) return null;
+      if (runtime.socialBarShown) return null;
+      if (!canTriggerPushPrompt(session, settings)) return null;
+
+      const ad = selectAd(ads, "SOCIAL_BAR", session);
+      if (fire(ad, "social-display")) {
+        runtime.socialBarShown = true;
+        session.pushPromptShown = true;
+        saveSession(session);
+        return ad;
+      }
+      return null;
+    },
+
+    dismissSocialBar(adId?: string) {
+      runtime.socialBarShown = true;
+      session.pushPromptShown = true;
+      session.socialBarDismissedAt = Date.now();
+      if (adId) {
+        session.lastShown[adId] = Date.now();
+        session.shownCounts[adId] = Math.max(
+          session.shownCounts[adId] ?? 0,
+          1,
+        );
+      }
+      saveSession(session);
+    },
+
+    landingPopunder() {
+      return firePopunder("first-interaction");
+    },
 
     // Get current ad (for manual placement)
     getAdByType(type: string, placement?: string) {
@@ -240,11 +298,13 @@ export function createEngine({ ads, settings, onEvent }: EngineProps) {
     // Reset session (for testing)
     resetSession() {
       Object.assign(session, {
+        startedAt: Date.now(),
         smartClicks: 0,
         windowStart: Date.now(),
         lastSmartTrigger: 0,
         popunderShown: false,
         pushPromptShown: false,
+        socialBarDismissedAt: null,
         videoCount: 0,
         popunderShownAt: null,
         lastShown: {},

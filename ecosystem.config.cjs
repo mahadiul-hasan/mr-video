@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: "mr-video-web",
+      name: "vvideos-web",
       script: "npm",
       args: "run start",
       cwd: __dirname,
@@ -10,7 +10,7 @@ module.exports = {
       },
     },
     {
-      name: "mr-video-worker",
+      name: "vvideos-worker",
       script: "npm",
       args: "run worker:video",
       cwd: __dirname,
@@ -20,4 +20,3 @@ module.exports = {
     },
   ],
 };
-

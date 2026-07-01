@@ -9,6 +9,7 @@ import {
   useCallback,
   useState,
 } from "react";
+import { usePathname } from "next/navigation";
 import { initAdEngine } from "@/lib/ads/engine";
 import type {
   MonetizationAd,
@@ -51,11 +52,20 @@ export function AdProvider({
   ads: MonetizationAd[];
   settings: MonetizationSettings;
 }) {
+  const pathname = usePathname();
+  const isWatchPage = pathname?.startsWith("/watch/");
   const engineRef = useRef<ReturnType<typeof initAdEngine> | null>(null);
   const [socialBarAd, setSocialBarAd] = useState<MonetizationResult | null>(
     null,
   );
+  const socialBarHideTimerRef = useRef<number | null>(null);
   const subscribersRef = useRef<((event: MonetizationResult) => void)[]>([]);
+
+  const clearSocialBarHideTimer = useCallback(() => {
+    if (socialBarHideTimerRef.current === null) return;
+    window.clearTimeout(socialBarHideTimerRef.current);
+    socialBarHideTimerRef.current = null;
+  }, []);
 
   const notifySubscribers = useCallback((event: MonetizationResult) => {
     subscribersRef.current.forEach((callback) => callback(event));
@@ -66,11 +76,16 @@ export function AdProvider({
       notifySubscribers(event);
 
       if (event.type === "SOCIAL_BAR") {
+        if (!isWatchPage) return;
+        clearSocialBarHideTimer();
         setSocialBarAd(event);
-        setTimeout(() => setSocialBarAd(null), 10000);
+        socialBarHideTimerRef.current = window.setTimeout(() => {
+          setSocialBarAd(null);
+          socialBarHideTimerRef.current = null;
+        }, 10000);
       }
     },
-    [notifySubscribers],
+    [clearSocialBarHideTimer, isWatchPage, notifySubscribers],
   );
 
   useEffect(() => {
@@ -81,9 +96,103 @@ export function AdProvider({
     });
 
     return () => {
+      clearSocialBarHideTimer();
       engineRef.current = null;
     };
-  }, [ads, settings, handleAdEvent]);
+  }, [ads, clearSocialBarHideTimer, settings, handleAdEvent]);
+
+  useEffect(() => {
+    if (isWatchPage) return;
+    clearSocialBarHideTimer();
+    const clearTimer = window.setTimeout(() => setSocialBarAd(null), 0);
+    return () => window.clearTimeout(clearTimer);
+  }, [clearSocialBarHideTimer, isWatchPage, pathname]);
+
+  useEffect(() => {
+    if (!settings.smartlinkEnabled) return;
+
+    const timers: number[] = [];
+    const maxPerMinute = Math.max(1, settings.smartlinkMaxPerMinute);
+    const minPerMinute = Math.max(
+      0,
+      Math.min(settings.smartlinkMinPerMinute, maxPerMinute),
+    );
+    const attemptsPerMinute = Math.max(minPerMinute, maxPerMinute);
+    const spacingMs = Math.floor(60000 / attemptsPerMinute);
+
+    const scheduleSmartlinkWindow = () => {
+      for (let index = 0; index < attemptsPerMinute; index++) {
+        const delay = index === 0 ? 10000 : spacingMs * index;
+        timers.push(
+          window.setTimeout(() => {
+            engineRef.current?.landingSmartlink();
+          }, delay),
+        );
+      }
+    };
+
+    scheduleSmartlinkWindow();
+    const smartlinkWindowInterval = window.setInterval(
+      scheduleSmartlinkWindow,
+      60000,
+    );
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+      window.clearInterval(smartlinkWindowInterval);
+    };
+  }, [
+    settings.smartlinkEnabled,
+    settings.smartlinkMaxPerMinute,
+    settings.smartlinkMinPerMinute,
+  ]);
+
+  useEffect(() => {
+    clearSocialBarHideTimer();
+    const clearTimer = window.setTimeout(() => setSocialBarAd(null), 0);
+
+    if (!isWatchPage || !settings.socialBarEnabled) {
+      return () => window.clearTimeout(clearTimer);
+    }
+
+    const socialTimer = window.setTimeout(() => {
+      engineRef.current?.landingSocialBar();
+    }, 12000);
+
+    return () => {
+      window.clearTimeout(clearTimer);
+      window.clearTimeout(socialTimer);
+    };
+  }, [clearSocialBarHideTimer, isWatchPage, pathname, settings.socialBarEnabled]);
+
+  useEffect(() => {
+    let fired = false;
+
+    const handleFirstInteraction = () => {
+      if (fired) return;
+      fired = true;
+      engineRef.current?.landingPopunder();
+    };
+
+    window.addEventListener("pointerdown", handleFirstInteraction, {
+      capture: true,
+      once: true,
+      passive: true,
+    });
+    window.addEventListener("keydown", handleFirstInteraction, {
+      capture: true,
+      once: true,
+    });
+
+    return () => {
+      window.removeEventListener("pointerdown", handleFirstInteraction, {
+        capture: true,
+      });
+      window.removeEventListener("keydown", handleFirstInteraction, {
+        capture: true,
+      });
+    };
+  }, [ads, settings]);
 
   const subscribe = useCallback(
     (callback: (event: MonetizationResult) => void) => {
@@ -98,8 +207,10 @@ export function AdProvider({
   );
 
   const closeSocialBar = useCallback(() => {
+    clearSocialBarHideTimer();
+    engineRef.current?.dismissSocialBar(socialBarAd?.adId);
     setSocialBarAd(null);
-  }, []);
+  }, [clearSocialBarHideTimer, socialBarAd?.adId]);
 
   const displayBannerAd = useCallback(
     (placement: string) => {
@@ -145,6 +256,8 @@ export function AdProvider({
     [ads, settings.nativeEnabled],
   );
 
+  const visibleSocialBarAd = isWatchPage ? socialBarAd : null;
+
   const value: AdContextType = {
     onPlay: () => engineRef.current?.videoPlay(),
     onPause: () => engineRef.current?.handle("pause"),
@@ -161,7 +274,7 @@ export function AdProvider({
     getBannerAd,
     getNativeAd,
     subscribe,
-    socialBarAd,
+    socialBarAd: visibleSocialBarAd,
     closeSocialBar,
     settings,
     ads,

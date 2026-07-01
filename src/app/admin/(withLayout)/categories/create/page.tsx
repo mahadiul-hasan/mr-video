@@ -10,7 +10,7 @@ export const metadata = {
   description: "Create a new category",
 };
 
-async function createCategoryAction(prevState: any, formData: FormData) {
+async function createCategoryAction(prevState: unknown, formData: FormData) {
   "use server";
 
   const name = formData.get("name") as string;
@@ -46,3 +46,4 @@ export default function CreateCategoryPage() {
     </div>
   );
 }
+

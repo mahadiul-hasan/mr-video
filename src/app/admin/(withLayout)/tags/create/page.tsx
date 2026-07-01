@@ -11,7 +11,7 @@ export const metadata = {
   description: "Create a new tag",
 };
 
-async function createTagAction(prevState: any, formData: FormData) {
+async function createTagAction(prevState: unknown, formData: FormData) {
   "use server";
 
   const name = formData.get("name") as string;
@@ -47,3 +47,4 @@ export default function CreateTagPage() {
     </div>
   );
 }
+

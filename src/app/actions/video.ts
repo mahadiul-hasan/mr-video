@@ -9,7 +9,7 @@ import { slugify } from "@/lib/videos/slug";
 import { uploadSourceVideoToR2 } from "@/lib/r2/upload";
 import { revalidatePublicCaches } from "@/lib/videos/public-videos";
 import { Prisma } from "@/generated/prisma/client";
-import { enqueueVideoJob } from "@/lib/video-processing/queue";
+import { enqueueVideoJob, removeVideoJobs } from "@/lib/video-processing/queue";
 import { R2_CDN_URL } from "@/lib/r2/client";
 import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { r2Client, R2_BUCKET } from "@/lib/r2/client";
@@ -22,6 +22,14 @@ const videoSchema = z.object({
   isPublished: z.boolean(),
   tagIds: z.array(z.string()).max(20),
 });
+
+const MAX_VIDEO_UPLOAD_BYTES = 1024 * 1024 * 1024;
+
+function validateVideoFileSize(videoFile: File) {
+  if (videoFile.size > MAX_VIDEO_UPLOAD_BYTES) {
+    throw new Error("Video file must be 1024MB or smaller");
+  }
+}
 
 const videoInclude = {
   category: true,
@@ -139,6 +147,7 @@ export async function createVideo(data: {
   await requireAdmin();
 
   const validated = videoSchema.parse(data);
+  validateVideoFileSize(data.videoFile);
   const baseSlug = slugify(validated.slug || validated.title);
   const slug = await ensureUniqueSlug(baseSlug);
   const videoId = crypto.randomUUID();
@@ -215,7 +224,7 @@ export async function updateVideo(
 
   const existingVideo = await prisma.video.findUnique({
     where: { id },
-    select: { r2Key: true, slug: true },
+    select: { r2Key: true, slug: true, status: true, processingError: true },
   });
 
   if (!existingVideo) {
@@ -234,21 +243,33 @@ export async function updateVideo(
         processingError: null;
       }
     | undefined;
+  let replacementJob:
+    | {
+        sourceKey: string;
+        cleanupPrefix: string;
+      }
+    | undefined;
   if (data.videoFile && data.videoFile.size > 0) {
+    validateVideoFileSize(data.videoFile);
     const sourceKey = `uploads/${id}/${Date.now()}-${(validated.title || existingVideo.slug).replace(/\s+/g, "-").toLowerCase()}.mp4`;
     const oldPrefix = existingVideo.r2Key.substring(
       0,
       existingVideo.r2Key.lastIndexOf("/"),
     );
 
-    await uploadSourceVideoToR2(data.videoFile, sourceKey);
-    await enqueueVideoJob({
-      kind: "PROCESS_VIDEO",
-      videoId: id,
-      sourceKey,
-      cleanupPrefix: oldPrefix,
-    });
     processingUpdate = { status: "PROCESSING", processingError: null };
+    try {
+      await uploadSourceVideoToR2(data.videoFile, sourceKey);
+    } catch (error) {
+      return {
+        success: false,
+        error:
+          error instanceof Error
+            ? `Video source upload failed: ${error.message}`
+            : "Video source upload failed",
+      };
+    }
+    replacementJob = { sourceKey, cleanupPrefix: oldPrefix };
   }
 
   // Update database
@@ -275,6 +296,42 @@ export async function updateVideo(
     },
     include: videoInclude,
   });
+
+  if (replacementJob) {
+    try {
+      await enqueueVideoJob({
+        kind: "PROCESS_VIDEO",
+        videoId: id,
+        sourceKey: replacementJob.sourceKey,
+        cleanupPrefix: replacementJob.cleanupPrefix,
+      });
+    } catch (error) {
+      await r2Client
+        .send(
+          new DeleteObjectCommand({
+            Bucket: R2_BUCKET,
+            Key: replacementJob.sourceKey,
+          }),
+        )
+        .catch(() => {});
+      await prisma.video
+        .update({
+          where: { id },
+          data: {
+            status: existingVideo.status,
+            processingError: existingVideo.processingError,
+          },
+        })
+        .catch(() => {});
+      return {
+        success: false,
+        error:
+          error instanceof Error
+            ? `Video replacement queue failed: ${error.message}`
+            : "Video replacement queue failed",
+      };
+    }
+  }
 
   // Revalidate caches
   revalidatePath("/admin/videos");
@@ -306,6 +363,7 @@ export async function deleteVideo(id: string) {
   }
 
   const prefix = video.r2Key.substring(0, video.r2Key.lastIndexOf("/"));
+  await removeVideoJobs([id]);
   await enqueueVideoJob({ kind: "DELETE_PREFIX", prefix });
   await prisma.video.delete({ where: { id } });
 
@@ -322,9 +380,10 @@ export async function bulkDeleteVideos(ids: string[]) {
 
   const videos = await prisma.video.findMany({
     where: { id: { in: ids } },
-    select: { r2Key: true, slug: true },
+    select: { id: true, r2Key: true, slug: true },
   });
 
+  await removeVideoJobs(videos.map((video) => video.id));
   await Promise.all(
     videos.map((video) =>
       enqueueVideoJob({

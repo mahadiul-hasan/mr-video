@@ -65,19 +65,3 @@ function mapSettings(settings: {
 }): MonetizationSettings {
   return settings;
 }
-
-export function findPlacementAd(
-  ads: MonetizationAd[],
-  type: MonetizationAd["type"],
-  placement: string,
-) {
-  return (
-    ads
-      .filter((ad) => ad.type === type && ad.placement === placement)
-      .toSorted((a, b) => {
-        const priority = (b.priority ?? 0) - (a.priority ?? 0);
-        if (priority !== 0) return priority;
-        return String(a.id).localeCompare(String(b.id));
-      })[0] ?? null
-  );
-}

@@ -12,11 +12,9 @@ import { Switch } from "@/components/ui/switch";
 import { AdType } from "@/generated/prisma/enums";
 import { toast } from "sonner";
 import TypeSelect from "./type-select";
-import PlacementSelect from "./placement-select";
-import { requiresPlacement } from "@/lib/ads/ad-rules";
 
 type AdFormProps = {
-  action: (prevState: any, formData: FormData) => Promise<any>;
+  action: (prevState: AdActionState, formData: FormData) => Promise<AdActionState>;
   initialData?: {
     id?: string;
     name?: string;
@@ -32,6 +30,25 @@ type AdFormProps = {
   submitLabel: string;
   redirectTo?: string;
 };
+
+type AdActionState = {
+  success: boolean;
+  error?: string | null;
+  errors?: unknown;
+  data?: unknown;
+};
+
+function defaultPlacementForType(type: AdType) {
+  if (type === "BANNER") return "header";
+  if (type === "NATIVE_BANNER") return "grid_native_every_6";
+  return "";
+}
+
+function placementLabelForType(type: AdType) {
+  if (type === "BANNER") return "Header";
+  if (type === "NATIVE_BANNER") return "Video grid after every 6 items";
+  return null;
+}
 
 export function AdForm({
   action,
@@ -51,11 +68,12 @@ export function AdForm({
   const [selectedType, setSelectedType] = useState<AdType>(
     initialData?.type || "BANNER",
   );
-  const [placement, setPlacement] = useState<string>(
-    initialData?.placement || "",
-  );
+  const placement = defaultPlacementForType(selectedType);
+  const placementLabel = placementLabelForType(selectedType);
 
-  const showPlacement = requiresPlacement(selectedType);
+  function handleTypeChange(value: AdType) {
+    setSelectedType(value);
+  }
 
   // Handle redirect after success
   useEffect(() => {
@@ -104,24 +122,17 @@ export function AdForm({
         <input type="hidden" name="type" value={selectedType} />
         <TypeSelect
           value={selectedType}
-          onChange={(value) => setSelectedType(value)}
+          onChange={handleTypeChange}
         />
       </div>
 
-      {/* Placement - Only show if required by ad type */}
-      {showPlacement && (
-        <div className="space-y-2">
-          <Label htmlFor="placement">Placement</Label>
-          <input type="hidden" name="placement" value={placement} />
-          <PlacementSelect
-            value={placement}
-            onChange={(value) => setPlacement(value)}
-          />
+      <input type="hidden" name="placement" value={placement} />
+      {placementLabel && (
+        <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
+          <span className="font-medium text-foreground">Placement:</span>{" "}
+          <span className="text-muted-foreground">{placementLabel}</span>
         </div>
       )}
-
-      {/* If placement not required, send null */}
-      {!showPlacement && <input type="hidden" name="placement" value="" />}
 
       {/* Script */}
       <div className="space-y-2">

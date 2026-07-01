@@ -44,21 +44,17 @@ export async function getCachedData<T>(
     if (cached) {
       try {
         return JSON.parse(cached) as T;
-      } catch (parseError) {}
+      } catch {}
     }
 
     const data = await fetcher();
 
     if (data !== null && data !== undefined) {
-      const dataToCache =
-        Array.isArray(data) && data.length === 0 ? null : data;
-      if (dataToCache) {
-        await redis.setex(key, ttl, JSON.stringify(dataToCache));
-      }
+      await redis.setex(key, ttl, JSON.stringify(data));
     }
 
     return data;
-  } catch (error) {
+  } catch {
     return await fetcher();
   }
 }
@@ -73,7 +69,7 @@ export async function setCachedData<T>(
     if (redis && typeof redis.setex === "function") {
       await redis.setex(key, ttl, JSON.stringify(data));
     }
-  } catch (error) {}
+  } catch {}
 }
 
 // Get cache without fallback
@@ -85,20 +81,48 @@ export async function getCached<T>(key: string): Promise<T | null> {
       return JSON.parse(cached) as T;
     }
     return null;
-  } catch (error) {
+  } catch {
     return null;
   }
 }
 
-// Invalidate cache by pattern
-export async function invalidateCachePattern(pattern: string): Promise<void> {
+export async function scanKeys(pattern = "*", limit = 10000): Promise<string[]> {
   try {
-    if (!redis || typeof redis.keys !== "function") return;
-    const keys = await redis.keys(pattern);
+    if (!redis || typeof redis.scan !== "function") return [];
+
+    const keys: string[] = [];
+    let cursor = "0";
+
+    do {
+      const [nextCursor, batch] = await redis.scan(
+        cursor,
+        "MATCH",
+        pattern,
+        "COUNT",
+        500,
+      );
+      cursor = nextCursor;
+      keys.push(...batch);
+    } while (cursor !== "0" && keys.length < limit);
+
+    return keys.slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+// Invalidate cache by pattern
+export async function invalidateCachePattern(pattern: string): Promise<number> {
+  try {
+    if (!redis || typeof redis.scan !== "function") return 0;
+    const keys = await scanKeys(pattern);
     if (keys.length > 0) {
-      await redis.del(...keys);
+      await redis.unlink(...keys);
     }
-  } catch (error) {}
+    return keys.length;
+  } catch {
+    return 0;
+  }
 }
 
 // Batch invalidate multiple patterns
@@ -116,7 +140,7 @@ export async function getCacheStats(): Promise<{
     if (!redis) {
       return { totalKeys: 0, memory: "0", hitRate: "0%" };
     }
-    const keys = await redis.keys("*");
+    const keys = await scanKeys("*");
     const memory = await redis.info("memory");
     const stats = await redis.info("stats");
 
@@ -133,7 +157,7 @@ export async function getCacheStats(): Promise<{
       memory: memoryMatch?.[1] || "0",
       hitRate: `${hitRate}%`,
     };
-  } catch (error) {
+  } catch {
     return {
       totalKeys: 0,
       memory: "0",
@@ -145,8 +169,9 @@ export async function getCacheStats(): Promise<{
 // Clear all cache (use with caution)
 export async function clearAllCache(): Promise<void> {
   try {
-    if (redis && typeof redis.flushall === "function") {
-      await redis.flushall();
-    }
-  } catch (error) {}
+    await Promise.all([
+      invalidateCachePattern("public:*"),
+      invalidateCachePattern("admin:*"),
+    ]);
+  } catch {}
 }

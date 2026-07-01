@@ -7,10 +7,12 @@ import {
   clearAllCache,
   invalidateCachePattern,
   CACHE_PATTERNS,
+  scanKeys,
 } from "@/lib/cache/cache-utils";
 import { revalidatePath } from "next/cache";
 import { redis } from "@/lib/redis";
 import prisma from "@/lib/prisma";
+import { getVideoQueueMetrics } from "@/lib/video-processing/queue";
 
 export interface CacheStatsData {
   totalKeys: number;
@@ -55,6 +57,86 @@ export interface SystemMetricsData {
   };
 }
 
+export async function getVideoQueueStatus(): Promise<{
+  success: boolean;
+  data?: {
+    queuedJobs: number;
+    processingJobs: number;
+    processingVideos: number;
+    readyVideos: number;
+    failedVideos: number;
+    workerLastSeenAt: string | null;
+    workerIsHealthy: boolean;
+    recentFailures: {
+      id: string;
+      title: string;
+      slug: string;
+      processingError: string | null;
+      updatedAt: string;
+    }[];
+  };
+  error?: string;
+}> {
+  try {
+    await requireAdmin();
+
+    const [
+      queueMetrics,
+      processingVideos,
+      readyVideos,
+      failedVideos,
+      workerLastSeenAt,
+      recentFailures,
+    ] = await Promise.all([
+      getVideoQueueMetrics(),
+      prisma.video.count({ where: { status: "PROCESSING" } }),
+      prisma.video.count({ where: { status: "READY" } }),
+      prisma.video.count({ where: { status: "FAILED" } }),
+      redis.get("queue:video:worker:heartbeat"),
+      prisma.video.findMany({
+        where: { status: "FAILED" },
+        select: {
+          id: true,
+          title: true,
+          slug: true,
+          processingError: true,
+          updatedAt: true,
+        },
+        orderBy: { updatedAt: "desc" },
+        take: 5,
+      }),
+    ]);
+
+    const workerLastSeenMs = workerLastSeenAt
+      ? new Date(workerLastSeenAt).getTime()
+      : 0;
+    const workerIsHealthy =
+      workerLastSeenMs > 0 && Date.now() - workerLastSeenMs < 30000;
+
+    return {
+      success: true,
+      data: {
+        queuedJobs: queueMetrics.queuedJobs,
+        processingJobs: queueMetrics.processingJobs,
+        processingVideos,
+        readyVideos,
+        failedVideos,
+        workerLastSeenAt,
+        workerIsHealthy,
+        recentFailures: recentFailures.map((video) => ({
+          ...video,
+          updatedAt: video.updatedAt.toISOString(),
+        })),
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Failed to read queue status",
+    };
+  }
+}
 export async function getCacheStatistics(): Promise<{
   success: boolean;
   data?: CacheStatsData;
@@ -78,9 +160,9 @@ export async function getCacheStatistics(): Promise<{
     ]);
 
     const [publicKeys, rateLimitKeys, adminKeys] = await Promise.all([
-      redis.keys("public:*"),
-      redis.keys("ratelimit:*"),
-      redis.keys("admin:*"),
+      scanKeys("public:*"),
+      scanKeys("ratelimit:*"),
+      scanKeys("admin:*"),
     ]);
 
     const memoryMatch = memoryInfo.match(/used_memory_human:(\S+)/);
@@ -167,20 +249,17 @@ export async function clearCache(
         clearedCount = await invalidateAndCount(
           CACHE_PATTERNS.PUBLIC.CATEGORIES,
         );
-        await invalidateCachePattern("admin:categories:*");
-        clearedCount += await invalidateAndCount("admin:categories:*");
+        clearedCount += await invalidateCachePattern("admin:categories:*");
         break;
       case "tags":
         clearedCount = await invalidateAndCount(CACHE_PATTERNS.PUBLIC.TAGS);
-        await invalidateCachePattern("admin:tags:*");
-        clearedCount += await invalidateAndCount("admin:tags:*");
+        clearedCount += await invalidateCachePattern("admin:tags:*");
         break;
       case "videos":
         clearedCount = await invalidateAndCount(
           CACHE_PATTERNS.PUBLIC.ALL_VIDEOS,
         );
-        await invalidateCachePattern("admin:videos:*");
-        clearedCount += await invalidateAndCount("admin:videos:*");
+        clearedCount += await invalidateCachePattern("admin:videos:*");
         break;
       case "ads":
         clearedCount = await invalidateAndCount("public:ads:*");
@@ -216,22 +295,14 @@ export async function clearCache(
 }
 
 async function invalidateAndCount(pattern: string): Promise<number> {
-  try {
-    const keys = await redis.keys(pattern);
-    if (keys.length > 0) {
-      await invalidateCachePattern(pattern);
-    }
-    return keys.length;
-  } catch (error) {
-    return 0;
-  }
+  return invalidateCachePattern(pattern);
 }
 
 async function getTotalKeysCount(): Promise<number> {
   try {
-    const keys = await redis.keys("*");
+    const keys = await scanKeys("*");
     return keys.length;
-  } catch (error) {
+  } catch {
     return 0;
   }
 }
@@ -280,9 +351,9 @@ export async function getSystemMetrics(): Promise<{
     const cacheStats = await getCacheStats();
 
     const [publicKeys, adminKeys, rateLimitKeys] = await Promise.all([
-      redis.keys("public:*"),
-      redis.keys("admin:*"),
-      redis.keys("ratelimit:*"),
+      scanKeys("public:*"),
+      scanKeys("admin:*"),
+      scanKeys("ratelimit:*"),
     ]);
 
     const hitRateMatch = cacheStats.hitRate.match(/(\d+(?:\.\d+)?)/);
@@ -346,7 +417,7 @@ export async function getCacheKeyDetails(pattern?: string) {
     await requireAdmin();
 
     const searchPattern = pattern ? `*${pattern}*` : "*";
-    const keys = await redis.keys(searchPattern);
+    const keys = await scanKeys(searchPattern);
 
     const keyDetails = await Promise.all(
       keys.slice(0, 100).map(async (key) => {
@@ -378,7 +449,7 @@ export async function getCacheTTLDistribution() {
   try {
     await requireAdmin();
 
-    const keys = await redis.keys("*");
+    const keys = await scanKeys("*");
     const ttlDistribution = {
       short: 0,
       medium: 0,
@@ -417,3 +488,5 @@ export async function getCacheTTLDistribution() {
     };
   }
 }
+
+

@@ -1,4 +1,4 @@
-import Redis from "ioredis";
+import Redis, { type RedisOptions } from "ioredis";
 
 const getRedisUrl = () => {
   if (process.env.REDIS_URL) {
@@ -14,9 +14,24 @@ const globalForRedis = globalThis as unknown as {
   redis: Redis | undefined;
 };
 
+function getRedisConnectionOptions(): RedisOptions {
+  const url = new URL(getRedisUrl());
+  const db = url.pathname.length > 1 ? Number(url.pathname.slice(1)) : undefined;
+
+  return {
+    host: url.hostname,
+    port: url.port ? Number(url.port) : 6379,
+    username: url.username ? decodeURIComponent(url.username) : undefined,
+    password: url.password ? decodeURIComponent(url.password) : undefined,
+    db: Number.isFinite(db) ? db : undefined,
+    tls: url.protocol === "rediss:" ? {} : undefined,
+  };
+}
+
 export const redis =
   globalForRedis.redis ??
-  new Redis(getRedisUrl(), {
+  new Redis({
+    ...getRedisConnectionOptions(),
     maxRetriesPerRequest: 3,
     retryStrategy: (times: number) => {
       if (times > 3) {

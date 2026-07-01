@@ -371,6 +371,11 @@ export async function getRelatedPublicVideos({
 export async function revalidatePublicCaches() {
   await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.ALL_VIDEOS);
   await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.HOME);
+  await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.CATEGORY_VIDEOS);
+  await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.TAG_VIDEOS);
+  await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.RELATED_VIDEOS);
+  await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.SEARCH);
+  await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.SINGLE_VIDEO);
   await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.CATEGORIES);
   await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.TAGS);
 }
@@ -380,6 +385,12 @@ export async function revalidateVideoCache(slug: string) {
   await invalidateCachePattern(`public:related:${slug}:*`);
   await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.ALL_VIDEOS);
   await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.HOME);
+  await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.CATEGORY_VIDEOS);
+  await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.TAG_VIDEOS);
+  await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.RELATED_VIDEOS);
+  await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.SEARCH);
+  await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.CATEGORIES);
+  await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.TAGS);
 }
 
 export async function revalidateCategoryCache(slug: string) {
@@ -387,6 +398,8 @@ export async function revalidateCategoryCache(slug: string) {
   await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.CATEGORIES);
   await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.ALL_VIDEOS);
   await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.HOME);
+  await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.RELATED_VIDEOS);
+  await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.SEARCH);
 }
 
 export async function revalidateTagCache(slug: string) {
@@ -394,6 +407,8 @@ export async function revalidateTagCache(slug: string) {
   await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.TAGS);
   await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.ALL_VIDEOS);
   await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.HOME);
+  await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.RELATED_VIDEOS);
+  await invalidateCachePattern(CACHE_PATTERNS.PUBLIC.SEARCH);
 }
 
 export async function revalidateSearchCache() {
@@ -410,7 +425,6 @@ export async function incrementVideoViews(slug: string) {
       where: { slug },
       data: { views: { increment: 1 } },
     });
-    await revalidateVideoCache(slug);
   } catch {
     // Silently fail
   }

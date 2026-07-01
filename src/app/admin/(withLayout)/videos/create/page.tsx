@@ -5,13 +5,17 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { createVideo, getVideoFormOptions } from "@/app/actions/video";
 import { CreateVideoClient } from "@/components/admin/videos/create-video-client";
+import type { VideoFormState } from "@/components/admin/videos/video-form";
 
 export const metadata = {
   title: "Create Video - Admin",
   description: "Upload a new video",
 };
 
-async function createVideoAction(prevState: any, formData: FormData) {
+async function createVideoAction(
+  _prevState: VideoFormState,
+  formData: FormData,
+): Promise<VideoFormState> {
   "use server";
 
   try {
@@ -22,7 +26,7 @@ async function createVideoAction(prevState: any, formData: FormData) {
       | undefined;
 
     if (!videoFile) {
-      return { success: false, error: "Video file is required" };
+      return { success: false, error: "Video file is required", data: null };
     }
 
     const categoryId = formData.get("categoryId");
@@ -48,12 +52,17 @@ async function createVideoAction(prevState: any, formData: FormData) {
       };
     }
 
-    return result;
+    return {
+      success: result.success,
+      error: result.error ?? null,
+      data: result.data ?? null,
+    };
   } catch (error) {
     console.error("Create video error:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Failed to create video",
+      data: null,
     };
   }
 }
@@ -87,3 +96,4 @@ export default async function CreateVideoPage() {
     </div>
   );
 }
+

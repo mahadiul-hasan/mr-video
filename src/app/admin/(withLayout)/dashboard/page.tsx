@@ -3,6 +3,8 @@ import { Suspense } from "react";
 import { requireAdmin } from "@/lib/requireAdmin";
 import { SystemMetricsCard } from "@/components/admin/dashboard/system-metrics-card";
 import { CacheStatsCard } from "@/components/admin/dashboard/cache-stats-card";
+import { VideoQueueCard } from "@/components/admin/dashboard/video-queue-card";
+import { DbBackupCard } from "@/components/admin/dashboard/db-backup-card";
 
 export default async function AdminDashboardPage() {
   // Verify admin access on the server
@@ -17,6 +19,12 @@ export default async function AdminDashboardPage() {
       <Suspense fallback={<div>Loading system metrics...</div>}>
         <SystemMetricsCard />
       </Suspense>
+
+      <Suspense fallback={<div>Loading video queue...</div>}>
+        <VideoQueueCard />
+      </Suspense>
+
+      <DbBackupCard />
 
       <Suspense fallback={<div>Loading cache statistics...</div>}>
         <CacheStatsCard />

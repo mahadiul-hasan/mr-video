@@ -1,6 +1,6 @@
-// app/admin/ads/[id]/edit/page.tsx
 import { getAdById, updateAd } from "@/app/actions/ad";
 import { AdForm } from "@/components/admin/ads/ad-form";
+import { AdType } from "@/generated/prisma/enums";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
@@ -16,21 +16,35 @@ export const metadata = {
   description: "Edit advertisement",
 };
 
-async function updateAdAction(id: string, prevState: any, formData: FormData) {
+type AdActionState = {
+  success: boolean;
+  data?: unknown;
+  error?: string | null;
+};
+
+async function updateAdAction(
+  id: string,
+  prevState: AdActionState,
+  formData: FormData,
+) {
   "use server";
+
+  const optionalInt = (name: string) => {
+    const value = formData.get(name);
+    if (typeof value !== "string" || value.trim() === "") return null;
+    return parseInt(value, 10);
+  };
 
   const data = {
     name: formData.get("name") as string,
-    type: formData.get("type") as any,
+    type: formData.get("type") as AdType,
     script: formData.get("script") as string,
     placement: formData.get("placement") as string | null,
-    weight: formData.get("weight")
-      ? parseInt(formData.get("weight") as string)
-      : undefined,
-    priority: formData.get("priority") // ✅ Add priority
-      ? parseInt(formData.get("priority") as string)
-      : undefined,
-    isActive: formData.get("isActive") === "on", // ✅ Fix: Switch sends "on" when checked
+    weight: optionalInt("weight"),
+    cooldownSeconds: optionalInt("cooldownSeconds"),
+    frequencyCap: optionalInt("frequencyCap"),
+    priority: optionalInt("priority"),
+    isActive: formData.get("isActive") === "on",
   };
 
   try {
@@ -52,7 +66,6 @@ export default async function EditAdPage({ params }: Props) {
     notFound();
   }
 
-  // Create a bound action with the id
   const updateAction = updateAdAction.bind(null, id);
 
   return (

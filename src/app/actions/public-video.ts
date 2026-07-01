@@ -12,7 +12,7 @@ const PAGE_SIZE = 12;
 export async function loadMoreHomeVideos(page: number) {
   try {
     return await getPublicVideos({ page, limit: PAGE_SIZE });
-  } catch (error) {
+  } catch {
     return [];
   }
 }
@@ -24,7 +24,7 @@ export async function loadMoreSearchVideos(query: string, page: number) {
 
   try {
     return await searchPublicVideos({ query, page, limit: PAGE_SIZE });
-  } catch (error) {
+  } catch {
     return [];
   }
 }
@@ -41,7 +41,7 @@ export async function loadMoreCategoryVideos(slug: string, page: number) {
       limit: PAGE_SIZE,
     });
     return result?.videos ?? [];
-  } catch (error) {
+  } catch {
     return [];
   }
 }
@@ -54,7 +54,7 @@ export async function loadMoreTagVideos(slug: string, page: number) {
   try {
     const result = await getPublicVideosByTag({ slug, page, limit: PAGE_SIZE });
     return result?.videos ?? [];
-  } catch (error) {
+  } catch {
     return [];
   }
 }

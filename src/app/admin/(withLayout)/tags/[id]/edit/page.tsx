@@ -15,7 +15,7 @@ export const metadata = {
   description: "Edit tag",
 };
 
-async function updateTagAction(id: string, prevState: any, formData: FormData) {
+async function updateTagAction(id: string, prevState: unknown, formData: FormData) {
   "use server";
 
   const name = formData.get("name") as string;
@@ -57,3 +57,4 @@ export default async function EditTagPage({ params }: Props) {
     </div>
   );
 }
+

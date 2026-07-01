@@ -38,6 +38,8 @@ type CreateAdInput = {
   cooldownSeconds?: number | null;
   frequencyCap?: number | null;
   weight?: number | null;
+  priority?: number | null;
+  isActive?: boolean;
 };
 
 const adTypeSchema = z.enum([
@@ -56,12 +58,20 @@ const createAdSchema = z.object({
   cooldownSeconds: z.number().int().min(0).max(86400).nullable().optional(),
   frequencyCap: z.number().int().min(1).max(1000).nullable().optional(),
   weight: z.number().int().min(1).max(1000).nullable().optional(),
+  priority: z.number().int().min(0).max(1000).nullable().optional(),
+  isActive: z.boolean().optional(),
 });
 
 const updateAdSchema = createAdSchema.partial().extend({
   isActive: z.boolean().optional(),
-  priority: z.number().int().min(0).max(1000).optional(),
+  priority: z.number().int().min(0).max(1000).nullable().optional(),
 });
+
+function placementForAdType(type: AdType | (typeof adTypeSchema)["_output"]) {
+  if (type === "BANNER") return "header";
+  if (type === "NATIVE_BANNER") return "grid_native_every_6";
+  return null;
+}
 
 const settingsSchema = z.object({
   popunderEnabled: z.boolean().optional(),
@@ -101,7 +111,6 @@ const DEFAULT_SETTINGS = {
 async function invalidateAllAdCaches() {
   // Invalidate public ad caches
   await invalidateCachePattern("public:ads:*");
-  await invalidateCachePattern("public:ad-settings:*");
 
   // Invalidate admin ad caches
   await invalidateCachePattern("admin:ads:*");
@@ -124,10 +133,12 @@ export async function createAd(data: CreateAdInput) {
       type: parsed.type as AdType,
       name: parsed.name,
       script: parsed.script,
-      placement: parsed.placement ?? null,
+      placement: placementForAdType(parsed.type),
       cooldownSeconds: parsed.cooldownSeconds ?? null,
       frequencyCap: parsed.frequencyCap ?? null,
       weight: parsed.weight ?? 1,
+      priority: parsed.priority ?? 0,
+      isActive: parsed.isActive ?? true,
     },
   });
 
@@ -137,13 +148,18 @@ export async function createAd(data: CreateAdInput) {
 
 type UpdateAdInput = Partial<CreateAdInput> & {
   isActive?: boolean;
-  priority?: number;
+  priority?: number | null;
 };
 
 export async function updateAd(id: string, data: UpdateAdInput) {
   await requireAdmin();
   const parsedId = idSchema.parse(id);
   const parsed = updateAdSchema.parse(data);
+  const current = await prisma.adUnit.findUniqueOrThrow({
+    where: { id: parsedId },
+    select: { type: true },
+  });
+  const finalType = (parsed.type ?? current.type) as AdType;
 
   const res = await prisma.adUnit.update({
     where: { id: parsedId },
@@ -151,8 +167,7 @@ export async function updateAd(id: string, data: UpdateAdInput) {
       type: parsed.type as AdType | undefined,
       name: parsed.name,
       script: parsed.script,
-      placement:
-        parsed.placement === null ? null : (parsed.placement ?? undefined),
+      placement: placementForAdType(finalType),
       cooldownSeconds:
         parsed.cooldownSeconds === null
           ? null
@@ -164,7 +179,9 @@ export async function updateAd(id: string, data: UpdateAdInput) {
       weight: parsed.weight === null ? 1 : (parsed.weight ?? undefined),
       isActive: parsed.isActive,
       // Fix: Only update priority if it's provided (not undefined)
-      ...(parsed.priority !== undefined ? { priority: parsed.priority } : {}),
+      ...(parsed.priority !== undefined
+        ? { priority: parsed.priority ?? 0 }
+        : {}),
     },
   });
 

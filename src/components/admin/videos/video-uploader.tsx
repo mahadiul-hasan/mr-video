@@ -1,8 +1,8 @@
 // components/admin/videos/video-uploader.tsx
 "use client";
 
-import { useCallback, useState, useEffect } from "react";
-import { useDropzone } from "react-dropzone";
+import { useCallback, useState } from "react";
+import { useDropzone, type FileRejection } from "react-dropzone";
 import { Upload, X, FileVideo } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -17,20 +17,15 @@ type VideoUploaderProps = {
 export function VideoUploader({
   onFileSelect,
   acceptedTypes = ["video/mp4", "video/webm", "video/quicktime"],
-  maxSize = 500,
+  maxSize = 1024,
   disabled = false,
   currentFile,
 }: VideoUploaderProps) {
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   const onDrop = useCallback(
-    (acceptedFiles: File[], rejectedFiles: any[]) => {
+    (acceptedFiles: File[], rejectedFiles: FileRejection[]) => {
       setError(null);
 
       if (rejectedFiles.length > 0) {
@@ -59,7 +54,7 @@ export function VideoUploader({
     accept: acceptedTypes.reduce((acc, type) => ({ ...acc, [type]: [] }), {}),
     maxSize: maxSize * 1024 * 1024,
     multiple: false,
-    disabled: disabled || !mounted,
+    disabled,
   });
 
   const removeFile = () => {
@@ -67,18 +62,6 @@ export function VideoUploader({
     setError(null);
     onFileSelect(null);
   };
-
-  // Return a placeholder during SSR to avoid hydration mismatch
-  if (!mounted) {
-    return (
-      <div className="min-h-50 rounded-lg border-2 border-dashed border-muted-foreground/25 bg-muted/10 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-2 p-4 text-center">
-          <Upload className="h-12 w-12 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">Loading uploader...</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-2">
@@ -129,7 +112,7 @@ export function VideoUploader({
               {isDragActive ? "Drop video here" : "Drag & drop video here"}
             </p>
             <p className="text-xs text-muted-foreground">
-              or click to select • MP4, WebM up to {maxSize}MB
+              or click to select - MP4, WebM up to {maxSize}MB
             </p>
           </div>
         )}
@@ -139,3 +122,4 @@ export function VideoUploader({
     </div>
   );
 }
+

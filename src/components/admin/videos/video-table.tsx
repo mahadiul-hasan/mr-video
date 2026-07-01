@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import Link from "next/link";
@@ -134,6 +135,24 @@ export default function VideoTable({
         </Link>
       </div>
 
+      {selected.length > 0 && (
+        <div className="flex flex-col gap-2 rounded-md border border-destructive/20 bg-destructive/5 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <span className="text-destructive">
+            {selected.length} video{selected.length === 1 ? "" : "s"} selected
+          </span>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={handleBulkDelete}
+            disabled={isPending}
+            className="gap-2"
+          >
+            <Trash2 className="h-4 w-4" />
+            Delete selected
+          </Button>
+        </div>
+      )}
+
       <div className="border rounded-md">
         <Table>
           <TableHeader>
@@ -163,11 +182,15 @@ export default function VideoTable({
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-3">
-                    <img
-                      src={video.thumbnailUrl}
-                      alt=""
-                      className="h-14 w-24 rounded-md object-cover"
-                    />
+                    <div className="relative h-14 w-24 overflow-hidden rounded-md bg-muted">
+                      <Image
+                        src={video.thumbnailUrl}
+                        alt=""
+                        fill
+                        sizes="96px"
+                        className="object-cover"
+                      />
+                    </div>
                     <div>
                       <p className="font-medium truncate max-w-48">
                         {video.title}
@@ -184,7 +207,7 @@ export default function VideoTable({
                   </Badge>
                 </TableCell>
                 <TableCell className="text-muted-foreground max-w-48 truncate">
-                  {video.tags.map((t) => t.tag.name).join(", ") || "—"}
+                  {video.tags.map((t) => t.tag.name).join(", ") || "-"}
                 </TableCell>
                 <TableCell>
                   <div className="space-y-1">
@@ -241,7 +264,7 @@ export default function VideoTable({
         </Table>
         {data.length === 0 && (
           <div className="text-center py-8 text-muted-foreground">
-            No videos found. Click "Upload Video" to get started.
+            No videos found. Click Upload Video to get started.
           </div>
         )}
       </div>
@@ -256,7 +279,7 @@ export default function VideoTable({
             Previous
           </Button>
           {Array.from({ length: Math.min(5, totalPages) }).map((_, i) => {
-            let pageNum =
+            const pageNum =
               totalPages <= 5
                 ? i + 1
                 : page <= 3
@@ -293,3 +316,4 @@ export default function VideoTable({
     </div>
   );
 }
+

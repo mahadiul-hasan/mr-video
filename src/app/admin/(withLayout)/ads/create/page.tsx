@@ -1,6 +1,7 @@
 // app/admin/ads/create/page.tsx
 import { createAd } from "@/app/actions/ad";
 import { AdForm } from "@/components/admin/ads/ad-form";
+import { AdType } from "@/generated/prisma/enums";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
@@ -11,19 +12,33 @@ export const metadata = {
   description: "Create a new advertisement",
 };
 
+type AdActionState = {
+  success: boolean;
+  data?: unknown;
+  error?: string | null;
+  errors?: unknown;
+};
+
 // Fix the server action wrapper
-async function createAdAction(prevState: any, formData: FormData) {
+async function createAdAction(prevState: AdActionState, formData: FormData) {
   "use server";
+
+  const optionalInt = (name: string) => {
+    const value = formData.get(name);
+    if (typeof value !== "string" || value.trim() === "") return null;
+    return parseInt(value, 10);
+  };
 
   const data = {
     name: formData.get("name") as string,
-    type: formData.get("type") as any,
+    type: formData.get("type") as AdType,
     script: formData.get("script") as string,
     placement: formData.get("placement") as string | null,
-    weight: formData.get("weight")
-      ? parseInt(formData.get("weight") as string)
-      : 1,
-    isActive: formData.get("isActive") === "true",
+    weight: optionalInt("weight") ?? 1,
+    cooldownSeconds: optionalInt("cooldownSeconds"),
+    frequencyCap: optionalInt("frequencyCap"),
+    priority: optionalInt("priority") ?? 0,
+    isActive: formData.get("isActive") === "on",
   };
 
   try {

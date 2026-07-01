@@ -111,7 +111,8 @@ function SidebarProvider({
   }, [toggleSidebar]);
 
   React.useEffect(() => {
-    setMounted(true);
+    const timer = window.setTimeout(() => setMounted(true), 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   const state = mounted ? (open ? "expanded" : "collapsed") : "expanded";

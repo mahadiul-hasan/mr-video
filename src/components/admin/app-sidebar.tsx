@@ -91,7 +91,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <polygon points="10 9 16 12 10 15 10 9" fill="currentColor" />
               </svg>
             </div>
-            <span>Mr Video</span>
+            <span>VVideos</span>
           </Link>
         </div>
       </SidebarHeader>

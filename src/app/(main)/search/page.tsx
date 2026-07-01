@@ -18,21 +18,12 @@ export default async function SearchPage({
 
   return (
     <div className="mx-auto max-w-7xl space-y-5 px-4 py-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Search</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {query
-            ? `Results for "${query}"`
-            : "Enter a search term in the search box above."}
-        </p>
-      </div>
-
       {query && (!videos || videos.length === 0) ? (
         <Alert>
           <Search className="h-4 w-4" />
           <AlertTitle>No results found</AlertTitle>
           <AlertDescription>
-            No videos matched your search term "{query}". Please try a different
+            No videos matched your search term {query}. Please try a different
             search term.
           </AlertDescription>
         </Alert>

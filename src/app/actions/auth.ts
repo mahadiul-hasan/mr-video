@@ -33,7 +33,7 @@ export async function loginAction(_: LoginState, formData: FormData) {
         error: `Too many login attempts. Please try again in ${retryAfter} seconds.`,
       };
     }
-  } catch (error) {}
+  } catch {}
 
   const parsed = schema.safeParse({
     username: formData.get("username"),
@@ -81,7 +81,7 @@ export async function loginAction(_: LoginState, formData: FormData) {
     });
 
     return { success: true };
-  } catch (error) {
+  } catch {
     return { error: "An unexpected error occurred. Please try again." };
   }
 }
@@ -97,3 +97,5 @@ export async function logoutAction() {
   // Optional: Revalidate paths after logout
   // revalidatePath("/admin");
 }
+
+

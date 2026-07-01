@@ -38,7 +38,7 @@ const VideoUploader = dynamic(
 );
 
 type Option = { id: string; name: string };
-type VideoFormState = {
+export type VideoFormState = {
   success: boolean;
   error: string | null;
   data: unknown;

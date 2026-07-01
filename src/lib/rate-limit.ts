@@ -50,7 +50,7 @@ export async function rateLimit(
       remaining,
       reset,
     };
-  } catch (error) {
+  } catch {
     // On error, allow the request (fail open)
     return {
       success: true,
@@ -88,7 +88,7 @@ export async function getRateLimitStatus(
       remaining,
       reset,
     };
-  } catch (error) {
+  } catch {
     return {
       success: true,
       limit,
@@ -106,5 +106,5 @@ export async function resetRateLimit(
   const key = `ratelimit:${type}:${identifier}`;
   try {
     await redis.del(key);
-  } catch (error) {}
+  } catch {}
 }

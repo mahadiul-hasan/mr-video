@@ -67,7 +67,7 @@ export function SiteHeader({
           className="shrink-0 text-lg font-extrabold tracking-tight"
           onClick={handleNavClick}
         >
-          MR Video
+          VVideos
         </Link>
 
         {/* Desktop Navigation */}

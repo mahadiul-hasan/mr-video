@@ -1,12 +1,15 @@
 // components/admin/videos/create-video-client.tsx
 "use client";
 
-import { VideoForm } from "./video-form";
+import { VideoForm, type VideoFormState } from "./video-form";
 
 type CreateVideoClientProps = {
   categories: { id: string; name: string }[];
   tags: { id: string; name: string }[];
-  createVideoAction: (prevState: any, formData: FormData) => Promise<any>;
+  createVideoAction: (
+    prevState: VideoFormState,
+    formData: FormData,
+  ) => Promise<VideoFormState>;
 };
 
 export function CreateVideoClient({
@@ -25,3 +28,4 @@ export function CreateVideoClient({
     />
   );
 }
+

@@ -15,8 +15,6 @@ type VideoPlayerWithAdsProps = {
 export function VideoPlayerWithAds({
   src,
   poster,
-  videoId,
-  title,
 }: VideoPlayerWithAdsProps) {
   const ad = useAd();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -32,10 +30,6 @@ export function VideoPlayerWithAds({
 
   const handlePause = () => {
     ad.onPause();
-  };
-
-  const handleLoaded = () => {
-    console.log(`Video loaded: ${title || videoId}`);
   };
 
   // Track first interaction
@@ -71,7 +65,6 @@ export function VideoPlayerWithAds({
       onPlay={handlePlay}
       onPause={handlePause}
       onTimeUpdate={handleTimeUpdate}
-      onLoaded={handleLoaded}
     />
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { Fragment, useEffect, useRef, useState, useTransition } from "react";
 import type { PublicVideo } from "@/lib/videos/public-videos";
 import { VideoCard } from "@/components/video/video-card";
 import { AdSlot } from "@/components/video/ad-slot";
@@ -59,20 +59,22 @@ export function VideoGridLoadMore({
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {videos.map((video, index) => (
-          <div key={`${video.id}-${index}`} className="space-y-4">
-            <VideoCard video={video} />
-            {/* Show native ad after every 6 videos if enabled */}
+          <Fragment key={`${video.id}-${index}`}>
+            <div className="h-full">
+              <VideoCard video={video} priority={index < 4} />
+            </div>
             {showNativeAds && (index + 1) % 6 === 0 && (
               <AdSlot
+                key={`native-${video.id}-${index}`}
                 placement={AD_PLACEMENTS.GRID_NATIVE_EVERY_6}
                 type="NATIVE_BANNER"
-                label="Sponsored"
                 compact
+                className="min-h-full overflow-hidden rounded-md border border-border bg-card transition hover:border-foreground/30 hover:shadow-md"
               />
             )}
-          </div>
+          </Fragment>
         ))}
       </div>
       <div

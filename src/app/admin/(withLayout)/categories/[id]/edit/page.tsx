@@ -17,7 +17,7 @@ export const metadata = {
 
 async function updateCategoryAction(
   id: string,
-  prevState: any,
+  prevState: unknown,
   formData: FormData,
 ) {
   "use server";
@@ -65,3 +65,4 @@ export default async function EditCategoryPage({ params }: Props) {
     </div>
   );
 }
+

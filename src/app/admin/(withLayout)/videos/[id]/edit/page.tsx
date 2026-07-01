@@ -10,6 +10,7 @@ import {
   updateVideo,
 } from "@/app/actions/video";
 import { EditVideoClient } from "@/components/admin/videos/edit-video-client";
+import type { VideoFormState } from "@/components/admin/videos/video-form";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -22,9 +23,9 @@ export const metadata = {
 
 async function updateVideoAction(
   id: string,
-  prevState: any,
+  _prevState: VideoFormState,
   formData: FormData,
-) {
+): Promise<VideoFormState> {
   "use server";
 
   try {
@@ -50,12 +51,17 @@ async function updateVideoAction(
       ...(hasNewVideo ? { videoFile } : {}),
     });
 
-    return result;
+    return {
+      success: result.success,
+      error: result.error ?? null,
+      data: result.data ?? null,
+    };
   } catch (error) {
     console.error("Update video error:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Failed to update video",
+      data: null,
     };
   }
 }
@@ -107,3 +113,4 @@ export default async function EditVideoPage({ params }: Props) {
     </div>
   );
 }
+

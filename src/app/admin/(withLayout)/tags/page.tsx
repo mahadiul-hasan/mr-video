@@ -26,7 +26,6 @@ export default async function TagsPage({ searchParams }: Props) {
 
   const tags = await getTags({ page, limit, search });
   const total = await getTagCount(search);
-  const totalPages = Math.ceil(total / limit);
 
   return (
     <div className="container py-8">
@@ -57,3 +56,4 @@ export default async function TagsPage({ searchParams }: Props) {
     </div>
   );
 }
+

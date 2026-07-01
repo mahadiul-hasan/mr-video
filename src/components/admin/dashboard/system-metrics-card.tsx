@@ -1,7 +1,7 @@
 // app/admin/dashboard/components/system-metrics-card.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Card,
   CardContent,
@@ -47,21 +47,25 @@ export function SystemMetricsCard() {
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadMetrics();
-  }, []);
-
-  async function loadMetrics() {
+  const loadMetrics = useCallback(async () => {
     try {
       const result = await getSystemMetrics();
       if (result.success && result.data) {
         setMetrics(result.data);
       }
-    } catch (error) {
+    } catch {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadMetrics();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [loadMetrics]);
 
   if (loading) {
     return (

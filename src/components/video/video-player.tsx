@@ -192,7 +192,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, HLSVideoPlayerProps>(
         {error && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-10">
             <div className="text-center text-white p-4">
-              <p className="text-red-500 mb-2">⚠️ {error}</p>
+              <p className="text-red-500 mb-2">Playback error: {error}</p>
               <button
                 onClick={() => window.location.reload()}
                 className="px-4 py-2 bg-white text-black rounded-md text-sm hover:bg-gray-200 transition"

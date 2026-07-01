@@ -1,12 +1,15 @@
 // components/admin/videos/edit-video-client.tsx
 "use client";
 
-import { VideoForm } from "./video-form";
+import { VideoForm, type VideoFormState } from "./video-form";
 
 type EditVideoClientProps = {
   categories: { id: string; name: string }[];
   tags: { id: string; name: string }[];
-  updateVideoAction: (prevState: any, formData: FormData) => Promise<any>;
+  updateVideoAction: (
+    prevState: VideoFormState,
+    formData: FormData,
+  ) => Promise<VideoFormState>;
   initialData: {
     id: string;
     title: string;
@@ -35,3 +38,4 @@ export function EditVideoClient({
     />
   );
 }
+

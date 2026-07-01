@@ -1,4 +1,5 @@
 import type { AdSessionState } from "./session";
+import { saveSession } from "./session";
 import type { MonetizationSettings } from "./types";
 
 export function canTriggerPopunder(
@@ -25,6 +26,7 @@ export function canTriggerSmartlink(
   if (now - session.windowStart >= 60000) {
     session.windowStart = now;
     session.smartClicks = 0;
+    saveSession(session);
   }
 
   if (now - last < 10000) return false;
@@ -37,6 +39,6 @@ export function canTriggerPushPrompt(
   settings: MonetizationSettings,
 ) {
   if (!settings.socialBarEnabled) return false;
-  if (session.pushPromptShown) return false;
-  return session.videoCount >= 2;
+  if (session.socialBarDismissedAt) return false;
+  return true;
 }

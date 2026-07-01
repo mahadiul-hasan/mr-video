@@ -11,7 +11,10 @@ import { toast } from "sonner";
 import { slugify } from "@/lib/videos/slug";
 
 type CategoryFormProps = {
-  action: (prevState: any, formData: FormData) => Promise<any>;
+  action: (
+    prevState: CategoryActionState,
+    formData: FormData,
+  ) => Promise<CategoryActionState>;
   initialData?: {
     id?: string;
     name?: string;
@@ -19,6 +22,12 @@ type CategoryFormProps = {
   };
   submitLabel: string;
   redirectTo?: string;
+};
+
+type CategoryActionState = {
+  success: boolean;
+  error?: string | null;
+  data?: unknown;
 };
 
 export function CategoryForm({
