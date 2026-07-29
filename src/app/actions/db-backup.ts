@@ -1,6 +1,7 @@
 "use server";
 
 import { spawn } from "child_process";
+import { existsSync, readdirSync } from "fs";
 import { requireAdmin } from "@/lib/requireAdmin";
 import { revalidatePath } from "next/cache";
 
@@ -10,8 +11,58 @@ function databaseUrl() {
   return url;
 }
 
+function normalizeCommandPath(value: string | undefined) {
+  if (!value) return null;
+  const command = value.trim();
+  return command.replace(/^["']|["']$/g, "");
+}
+
+function findWindowsPostgresTool(executable: "pg_dump.exe" | "psql.exe") {
+  if (process.platform !== "win32") return null;
+
+  const baseDir = "C:\\Program Files\\PostgreSQL";
+  if (!existsSync(baseDir)) return null;
+
+  const versions = readdirSync(baseDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort((a, b) => Number(b) - Number(a));
+
+  for (const version of versions) {
+    const candidate = `${baseDir}\\${version}\\bin\\${executable}`;
+    if (existsSync(candidate)) return candidate;
+  }
+
+  return null;
+}
+
+function commandPath(
+  value: string | undefined,
+  fallback: "pg_dump" | "psql",
+) {
+  const normalized = normalizeCommandPath(value);
+  if (normalized && existsSync(normalized)) return normalized;
+
+  const discovered = findWindowsPostgresTool(`${fallback}.exe`);
+  if (discovered) return discovered;
+
+  return normalized || fallback;
+}
+
 function runCommand(command: string, args: string[], input?: string) {
   return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+    if (
+      (command.includes("\\") || command.includes("/")) &&
+      !existsSync(command)
+    ) {
+      reject(
+        new Error(
+          `PostgreSQL tool not found at "${command}". Check PG_DUMP_PATH/PSQL_PATH or add PostgreSQL bin to PATH.`,
+        ),
+      );
+      return;
+    }
+
     const child = spawn(command, args, {
       env: process.env,
       windowsHide: true,
@@ -60,7 +111,7 @@ function removePrismaMigrationData(sql: string) {
 export async function createDatabaseBackup() {
   await requireAdmin();
 
-  const pgDump = process.env.PG_DUMP_PATH || "pg_dump";
+  const pgDump = commandPath(process.env.PG_DUMP_PATH, "pg_dump");
   try {
     const { stdout } = await runCommand(pgDump, [
       "--dbname",
@@ -97,7 +148,7 @@ export async function restoreDatabaseBackup(formData: FormData) {
   }
 
   const sql = removePrismaMigrationData(await backupFile.text());
-  const psql = process.env.PSQL_PATH || "psql";
+  const psql = commandPath(process.env.PSQL_PATH, "psql");
   const truncateSql = `
 TRUNCATE TABLE
   "VideoTag",
