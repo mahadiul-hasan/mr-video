@@ -3,13 +3,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: npm run start
+    command: sh -c "npx prisma migrate deploy && npm run start"
     restart: unless-stopped
     env_file:
       - .env
     environment:
       NODE_ENV: production
       REDIS_URL: redis://redis:6379
+      DATABASE_POOL_MAX: ${APP_DATABASE_POOL_MAX:-10}
+      DATABASE_IDLE_TIMEOUT_MS: ${DATABASE_IDLE_TIMEOUT_MS:-30000}
+      DATABASE_CONNECTION_TIMEOUT_MS: ${DATABASE_CONNECTION_TIMEOUT_MS:-5000}
+      DATABASE_POOL_MAX_USES: ${DATABASE_POOL_MAX_USES:-7500}
       PG_DUMP_PATH: pg_dump
       PSQL_PATH: psql
     depends_on:
@@ -18,12 +22,20 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    mem_limit: 2g
+    cpus: "1.50"
     logging:
       driver: json-file
       options:
-        max-size: "50m"
-        max-file: "5"
+        max-size: "10m"
+        max-file: "3"
 
   worker:
     build:
@@ -36,24 +48,44 @@ services:
     environment:
       NODE_ENV: production
       REDIS_URL: redis://redis:6379
+      DATABASE_POOL_MAX: ${WORKER_DATABASE_POOL_MAX:-3}
+      DATABASE_IDLE_TIMEOUT_MS: ${DATABASE_IDLE_TIMEOUT_MS:-30000}
+      DATABASE_CONNECTION_TIMEOUT_MS: ${DATABASE_CONNECTION_TIMEOUT_MS:-5000}
+      DATABASE_POOL_MAX_USES: ${DATABASE_POOL_MAX_USES:-7500}
       PG_DUMP_PATH: pg_dump
       PSQL_PATH: psql
     depends_on:
+      app:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    mem_limit: 3g
+    cpus: "2.00"
     logging:
       driver: json-file
       options:
-        max-size: "50m"
-        max-file: "5"
+        max-size: "10m"
+        max-file: "3"
 
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
     env_file:
       - .env
+    command:
+      - postgres
+      - -c
+      - max_connections=60
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=4GB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - checkpoint_completion_target=0.9
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -61,16 +93,18 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    mem_limit: 3g
+    cpus: "1.00"
     logging:
       driver: json-file
       options:
-        max-size: "50m"
-        max-file: "5"
+        max-size: "10m"
+        max-file: "3"
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
     healthcheck:
@@ -78,11 +112,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    mem_limit: 768m
+    cpus: "0.50"
     logging:
       driver: json-file
       options:
-        max-size: "50m"
-        max-file: "5"
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   postgres_data:
