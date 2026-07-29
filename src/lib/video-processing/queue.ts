@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 
 const VIDEO_QUEUE_KEY = "queue:video:jobs";
 const VIDEO_PROCESSING_KEY = "queue:video:processing";
+const VIDEO_PROGRESS_PREFIX = "queue:video:progress:";
 
 export type ProcessVideoJob = {
   kind: "PROCESS_VIDEO";
@@ -20,6 +21,15 @@ export type DeletePrefixJob = {
 
 export type VideoJob = ProcessVideoJob | DeletePrefixJob;
 
+export type VideoJobProgress = {
+  videoId: string;
+  stage: string;
+  percent: number;
+  message: string;
+  updatedAt: string;
+  workerName?: string;
+};
+
 function parseVideoJob(raw: string): VideoJob | null {
   try {
     const job = JSON.parse(raw) as VideoJob;
@@ -35,8 +45,26 @@ function serializeJob(job: VideoJob) {
   return JSON.stringify(job);
 }
 
+function jobIdentity(job: VideoJob) {
+  if (job.kind === "PROCESS_VIDEO") return `${job.kind}:${job.videoId}`;
+  return `${job.kind}:${job.prefix}`;
+}
+
 export async function enqueueVideoJob(job: VideoJob) {
-  await redis.lpush(VIDEO_QUEUE_KEY, serializeJob({ ...job, attempts: 0 }));
+  const nextJob = { ...job, attempts: job.attempts ?? 0 };
+  const identity = jobIdentity(nextJob);
+  const existingRaw = await Promise.all([
+    redis.lrange(VIDEO_QUEUE_KEY, 0, -1),
+    redis.lrange(VIDEO_PROCESSING_KEY, 0, -1),
+  ]);
+  const alreadyQueued = existingRaw.flat().some((raw) => {
+    const existing = parseVideoJob(raw);
+    return existing ? jobIdentity(existing) === identity : false;
+  });
+
+  if (!alreadyQueued) {
+    await redis.lpush(VIDEO_QUEUE_KEY, serializeJob(nextJob));
+  }
 }
 
 export async function reserveVideoJob(timeoutSeconds = 5): Promise<VideoJob | null> {
@@ -76,14 +104,31 @@ export async function recoverProcessingJobs() {
   const stuckJobs = await redis.lrange(VIDEO_PROCESSING_KEY, 0, -1);
   if (!stuckJobs.length) return 0;
 
+  const queuedRaw = await redis.lrange(VIDEO_QUEUE_KEY, 0, -1);
+  const queuedIdentities = new Set(
+    queuedRaw
+      .map(parseVideoJob)
+      .filter(Boolean)
+      .map((job) => jobIdentity(job as VideoJob)),
+  );
+  const recoveredIdentities = new Set<string>();
   const pipeline = redis.pipeline();
   for (const raw of stuckJobs) {
+    const job = parseVideoJob(raw);
     pipeline.lrem(VIDEO_PROCESSING_KEY, 1, raw);
+    if (!job) continue;
+
+    const identity = jobIdentity(job);
+    if (queuedIdentities.has(identity) || recoveredIdentities.has(identity)) {
+      continue;
+    }
+
+    recoveredIdentities.add(identity);
     pipeline.rpush(VIDEO_QUEUE_KEY, raw);
   }
   await pipeline.exec();
 
-  return stuckJobs.length;
+  return recoveredIdentities.size;
 }
 
 export async function removeVideoJobs(videoIds: string[]) {
@@ -142,9 +187,22 @@ export async function getVideoQueueMetrics() {
   const isValidJob = (job: VideoJob) =>
     job.kind === "DELETE_PREFIX" || existingIds.has(job.videoId);
 
+  const uniqueValidQueued = new Set(
+    queuedJobs.filter(isValidJob).map(jobIdentity),
+  );
+  const uniqueValidProcessing = new Set(
+    processingJobs.filter(isValidJob).map(jobIdentity),
+  );
+
   return {
-    queuedJobs: queuedJobs.filter(isValidJob).length,
-    processingJobs: processingJobs.filter(isValidJob).length,
+    queuedJobs: uniqueValidQueued.size,
+    processingJobs: uniqueValidProcessing.size,
+    processingVideoIds: processingJobs
+      .filter(
+        (job): job is ProcessVideoJob =>
+          job.kind === "PROCESS_VIDEO" && isValidJob(job),
+      )
+      .map((job) => job.videoId),
     staleJobs:
       queuedJobs.filter((job) => !isValidJob(job)).length +
       processingJobs.filter((job) => !isValidJob(job)).length,
@@ -175,15 +233,80 @@ export async function purgeStaleVideoJobs() {
     ).map((video) => video.id),
   );
 
-  const staleJobs = jobs.filter((item) => !existingIds.has(item.job.videoId));
-  if (!staleJobs.length) return 0;
+  const normalizeList = (items: string[]) => {
+    const seen = new Set<string>();
+    const kept: string[] = [];
+    let removed = 0;
+
+    for (const raw of items) {
+      const job = parseVideoJob(raw);
+      if (!job) {
+        removed++;
+        continue;
+      }
+
+      if (job.kind === "PROCESS_VIDEO" && !existingIds.has(job.videoId)) {
+        removed++;
+        continue;
+      }
+
+      const identity = jobIdentity(job);
+      if (seen.has(identity)) {
+        removed++;
+        continue;
+      }
+
+      seen.add(identity);
+      kept.push(raw);
+    }
+
+    return { kept, removed };
+  };
+
+  const queued = normalizeList(queuedRaw);
+  const processing = normalizeList(processingRaw);
+  const removed = queued.removed + processing.removed;
+  if (removed === 0) return 0;
 
   const pipeline = redis.pipeline();
-  for (const { raw } of staleJobs) {
-    pipeline.lrem(VIDEO_QUEUE_KEY, 0, raw);
-    pipeline.lrem(VIDEO_PROCESSING_KEY, 0, raw);
-  }
+  pipeline.del(VIDEO_QUEUE_KEY);
+  pipeline.del(VIDEO_PROCESSING_KEY);
+  for (const raw of queued.kept) pipeline.rpush(VIDEO_QUEUE_KEY, raw);
+  for (const raw of processing.kept) pipeline.rpush(VIDEO_PROCESSING_KEY, raw);
   await pipeline.exec();
 
-  return staleJobs.length;
+  return removed;
+}
+
+export async function setVideoJobProgress(progress: VideoJobProgress) {
+  await redis.set(
+    `${VIDEO_PROGRESS_PREFIX}${progress.videoId}`,
+    JSON.stringify(progress),
+    "EX",
+    60 * 60,
+  );
+}
+
+export async function clearVideoJobProgress(videoId: string) {
+  await redis.del(`${VIDEO_PROGRESS_PREFIX}${videoId}`);
+}
+
+export async function getVideoJobProgress(videoIds: string[]) {
+  const ids = [...new Set(videoIds)];
+  if (!ids.length) return [];
+
+  const values = await redis.mget(
+    ...ids.map((id) => `${VIDEO_PROGRESS_PREFIX}${id}`),
+  );
+
+  return values
+    .map((value) => {
+      if (!value) return null;
+      try {
+        return JSON.parse(value) as VideoJobProgress;
+      } catch {
+        return null;
+      }
+    })
+    .filter((value): value is VideoJobProgress => Boolean(value));
 }

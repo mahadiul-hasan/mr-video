@@ -7,17 +7,20 @@ import { redis } from "@/lib/redis";
 import { r2Client, R2_BUCKET } from "@/lib/r2/client";
 import {
   ackVideoJob,
+  clearVideoJobProgress,
   enqueueVideoJob,
   purgeStaleVideoJobs,
   recoverProcessingJobs,
   reserveVideoJob,
   retryVideoJob,
+  setVideoJobProgress,
 } from "@/lib/video-processing/queue";
 import { deletePrefix, processVideoJob } from "@/lib/video-processing/processor";
 
 const execAsync = promisify(exec);
 const WORKER_HEARTBEAT_KEY = "queue:video:worker:heartbeat";
 const ORPHAN_PROCESSING_GRACE_MS = 10 * 60 * 1000;
+const WORKER_NAME = process.env.WORKER_NAME || `worker-${process.pid}`;
 
 async function assertMediaToolsInstalled() {
   try {
@@ -59,6 +62,7 @@ async function handleOne() {
 
       if (!videoExists) {
         await ackVideoJob(job);
+        await clearVideoJobProgress(job.videoId);
         console.warn(
           `Skipped stale video job because video ${job.videoId} no longer exists.`,
         );
@@ -69,18 +73,31 @@ async function handleOne() {
         videoId: job.videoId,
         sourceKey: job.sourceKey,
         cleanupPrefix: job.cleanupPrefix,
+        onProgress: (progress) =>
+          setVideoJobProgress({
+            videoId: job.videoId,
+            workerName: WORKER_NAME,
+            updatedAt: new Date().toISOString(),
+            ...progress,
+          }),
       });
     } else if (job.kind === "DELETE_PREFIX") {
       await deletePrefix(job.prefix);
     }
 
     await ackVideoJob(job);
+    if (job.kind === "PROCESS_VIDEO") {
+      await clearVideoJobProgress(job.videoId);
+    }
   } catch (error) {
     const requeued = isNonRetryableError(error)
       ? false
       : await retryVideoJob(job, 3);
     if (!requeued) {
       await ackVideoJob(job);
+      if (job.kind === "PROCESS_VIDEO") {
+        await clearVideoJobProgress(job.videoId);
+      }
       console.error("Job permanently failed", job, error);
     }
   }

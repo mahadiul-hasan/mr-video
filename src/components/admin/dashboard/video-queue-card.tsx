@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import {
   Card,
   CardContent,
@@ -14,6 +15,7 @@ import { getVideoQueueStatus } from "@/app/actions/cache";
 type QueueStatus = {
   queuedJobs: number;
   processingJobs: number;
+  staleJobs: number;
   processingVideos: number;
   readyVideos: number;
   failedVideos: number;
@@ -25,6 +27,15 @@ type QueueStatus = {
     slug: string;
     processingError: string | null;
     updatedAt: string;
+  }[];
+  activeProgress: {
+    videoId: string;
+    title: string;
+    stage: string;
+    percent: number;
+    message: string;
+    updatedAt: string;
+    workerName?: string;
   }[];
 };
 
@@ -67,17 +78,50 @@ export function VideoQueueCard() {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
           <Metric label="Queued Jobs" value={status?.queuedJobs ?? 0} />
           <Metric label="Active Jobs" value={status?.processingJobs ?? 0} />
           <Metric label="Processing Videos" value={status?.processingVideos ?? 0} />
           <Metric label="Ready Videos" value={status?.readyVideos ?? 0} />
+          <Metric
+            label="Stale Jobs"
+            value={status?.staleJobs ?? 0}
+            variant={(status?.staleJobs ?? 0) > 0 ? "destructive" : "secondary"}
+          />
           <Metric
             label="Failed Videos"
             value={status?.failedVideos ?? 0}
             variant={(status?.failedVideos ?? 0) > 0 ? "destructive" : "secondary"}
           />
         </div>
+
+        {(status?.activeProgress?.length ?? 0) > 0 && (
+          <div className="rounded-lg border p-3">
+            <div className="mb-3 text-sm font-semibold">Active Processing</div>
+            <div className="space-y-3">
+              {status?.activeProgress.map((progress) => (
+                <div key={progress.videoId} className="space-y-2">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">
+                        {progress.title}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {progress.message}
+                        {progress.workerName ? ` - ${progress.workerName}` : ""}
+                      </div>
+                    </div>
+                    <Badge variant="secondary">{progress.percent}%</Badge>
+                  </div>
+                  <Progress value={progress.percent} className="h-2" />
+                  <div className="text-xs text-muted-foreground">
+                    Updated {new Date(progress.updatedAt).toLocaleTimeString()}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="rounded-lg border p-3 text-sm">
           <div className="text-xs text-muted-foreground">Worker Last Seen</div>

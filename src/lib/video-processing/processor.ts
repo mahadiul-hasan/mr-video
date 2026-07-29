@@ -187,6 +187,11 @@ export async function processVideoJob(input: {
   videoId: string;
   sourceKey: string;
   cleanupPrefix?: string;
+  onProgress?: (progress: {
+    stage: string;
+    percent: number;
+    message: string;
+  }) => Promise<void>;
 }) {
   const baseTmp = await mkdtemp(join(tmpdir(), "video-worker-"));
   const sourcePath = join(baseTmp, "input.mp4");
@@ -195,11 +200,21 @@ export async function processVideoJob(input: {
   const videoPrefix = `videos/${input.videoId}`;
 
   try {
+    await input.onProgress?.({
+      stage: "preparing",
+      percent: 5,
+      message: "Preparing temporary workspace",
+    });
     await mkdir(workDir, { recursive: true });
     for (const dir of ["360p", "480p", "720p", "1080p"]) {
       await mkdir(join(workDir, dir), { recursive: true });
     }
 
+    await input.onProgress?.({
+      stage: "downloading",
+      percent: 15,
+      message: "Downloading source video from R2",
+    });
     const object = await r2Client.send(
       new GetObjectCommand({ Bucket: R2_BUCKET, Key: input.sourceKey }),
     );
@@ -207,14 +222,39 @@ export async function processVideoJob(input: {
     if (!object.Body) throw new Error("Source video body missing");
     await pipeline(toNodeReadable(object.Body), createWriteStream(sourcePath));
 
+    await input.onProgress?.({
+      stage: "probing",
+      percent: 30,
+      message: "Extracting video duration",
+    });
     const duration = await getVideoDuration(sourcePath);
+    await input.onProgress?.({
+      stage: "thumbnail",
+      percent: 40,
+      message: "Generating thumbnail",
+    });
     await generateThumbnail(sourcePath, thumbnailPath);
+    await input.onProgress?.({
+      stage: "encoding",
+      percent: 55,
+      message: "Encoding adaptive HLS renditions",
+    });
     await convertToAdaptiveHls(sourcePath, workDir);
+    await input.onProgress?.({
+      stage: "uploading",
+      percent: 85,
+      message: "Uploading HLS output to R2",
+    });
     await uploadDir(workDir, videoPrefix);
 
     const hlsUrl = `${R2_CDN_URL}/${videoPrefix}/master.m3u8`;
     const thumbnailUrl = `${R2_CDN_URL}/${videoPrefix}/thumbnail.jpg`;
 
+    await input.onProgress?.({
+      stage: "finalizing",
+      percent: 95,
+      message: "Updating video record",
+    });
     await prisma.video.update({
       where: { id: input.videoId },
       data: {
@@ -232,6 +272,11 @@ export async function processVideoJob(input: {
     }
 
     await r2Client.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: input.sourceKey }));
+    await input.onProgress?.({
+      stage: "complete",
+      percent: 100,
+      message: "Processing complete",
+    });
   } catch (error) {
     await prisma.video.update({
       where: { id: input.videoId },

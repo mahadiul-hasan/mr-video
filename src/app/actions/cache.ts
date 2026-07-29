@@ -12,7 +12,10 @@ import {
 import { revalidatePath } from "next/cache";
 import { redis } from "@/lib/redis";
 import prisma from "@/lib/prisma";
-import { getVideoQueueMetrics } from "@/lib/video-processing/queue";
+import {
+  getVideoJobProgress,
+  getVideoQueueMetrics,
+} from "@/lib/video-processing/queue";
 
 export interface CacheStatsData {
   totalKeys: number;
@@ -62,6 +65,7 @@ export async function getVideoQueueStatus(): Promise<{
   data?: {
     queuedJobs: number;
     processingJobs: number;
+    staleJobs: number;
     processingVideos: number;
     readyVideos: number;
     failedVideos: number;
@@ -73,6 +77,15 @@ export async function getVideoQueueStatus(): Promise<{
       slug: string;
       processingError: string | null;
       updatedAt: string;
+    }[];
+    activeProgress: {
+      videoId: string;
+      title: string;
+      stage: string;
+      percent: number;
+      message: string;
+      updatedAt: string;
+      workerName?: string;
     }[];
   };
   error?: string;
@@ -106,6 +119,16 @@ export async function getVideoQueueStatus(): Promise<{
         take: 5,
       }),
     ]);
+    const [progressEntries, progressVideos] = await Promise.all([
+      getVideoJobProgress(queueMetrics.processingVideoIds),
+      prisma.video.findMany({
+        where: { id: { in: queueMetrics.processingVideoIds } },
+        select: { id: true, title: true },
+      }),
+    ]);
+    const titleById = new Map(
+      progressVideos.map((video) => [video.id, video.title]),
+    );
 
     const workerLastSeenMs = workerLastSeenAt
       ? new Date(workerLastSeenAt).getTime()
@@ -118,6 +141,7 @@ export async function getVideoQueueStatus(): Promise<{
       data: {
         queuedJobs: queueMetrics.queuedJobs,
         processingJobs: queueMetrics.processingJobs,
+        staleJobs: queueMetrics.staleJobs,
         processingVideos,
         readyVideos,
         failedVideos,
@@ -126,6 +150,10 @@ export async function getVideoQueueStatus(): Promise<{
         recentFailures: recentFailures.map((video) => ({
           ...video,
           updatedAt: video.updatedAt.toISOString(),
+        })),
+        activeProgress: progressEntries.map((progress) => ({
+          ...progress,
+          title: titleById.get(progress.videoId) ?? "Processing video",
         })),
       },
     };
