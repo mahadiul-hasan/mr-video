@@ -2,8 +2,11 @@ import { redis } from "@/lib/redis";
 import prisma from "@/lib/prisma";
 
 const VIDEO_QUEUE_KEY = "queue:video:jobs";
-const VIDEO_PROCESSING_KEY = "queue:video:processing";
+const LEGACY_VIDEO_PROCESSING_KEY = "queue:video:processing";
+const VIDEO_PROCESSING_PREFIX = "queue:video:processing:";
+const WORKER_HEARTBEAT_PREFIX = "queue:video:worker:";
 const VIDEO_PROGRESS_PREFIX = "queue:video:progress:";
+const STALE_WORKER_MS = 45_000;
 
 export type ProcessVideoJob = {
   kind: "PROCESS_VIDEO";
@@ -30,7 +33,7 @@ export type VideoJobProgress = {
   workerName?: string;
 };
 
-function parseVideoJob(raw: string): VideoJob | null {
+export function parseVideoJob(raw: string): VideoJob | null {
   try {
     const job = JSON.parse(raw) as VideoJob;
     if (job.kind === "PROCESS_VIDEO" && job.videoId && job.sourceKey) return job;
@@ -41,7 +44,7 @@ function parseVideoJob(raw: string): VideoJob | null {
   }
 }
 
-function serializeJob(job: VideoJob) {
+export function serializeVideoJob(job: VideoJob) {
   return JSON.stringify(job);
 }
 
@@ -53,56 +56,60 @@ function jobIdentity(job: VideoJob) {
 export async function enqueueVideoJob(job: VideoJob) {
   const nextJob = { ...job, attempts: job.attempts ?? 0 };
   const identity = jobIdentity(nextJob);
-  const existingRaw = await Promise.all([
-    redis.lrange(VIDEO_QUEUE_KEY, 0, -1),
-    redis.lrange(VIDEO_PROCESSING_KEY, 0, -1),
-  ]);
-  const alreadyQueued = existingRaw.flat().some((raw) => {
+  const existingRaw = await getAllQueueJobPayloads();
+  const alreadyQueued = existingRaw.some((raw) => {
     const existing = parseVideoJob(raw);
     return existing ? jobIdentity(existing) === identity : false;
   });
 
   if (!alreadyQueued) {
-    await redis.lpush(VIDEO_QUEUE_KEY, serializeJob(nextJob));
+    await redis.lpush(VIDEO_QUEUE_KEY, serializeVideoJob(nextJob));
   }
 }
 
-export async function reserveVideoJob(timeoutSeconds = 5): Promise<VideoJob | null> {
-  const raw = await redis.brpoplpush(
-    VIDEO_QUEUE_KEY,
-    VIDEO_PROCESSING_KEY,
-    timeoutSeconds,
-  );
+export async function reserveVideoJob(
+  workerName: string,
+  timeoutSeconds = 5,
+): Promise<VideoJob | null> {
+  const raw = await redis.brpop(VIDEO_QUEUE_KEY, timeoutSeconds);
   if (!raw) return null;
 
-  const job = parseVideoJob(raw);
-  if (!job) {
-    await redis.lrem(VIDEO_PROCESSING_KEY, 1, raw);
-    return null;
-  }
+  const payload = raw[1];
+  const job = parseVideoJob(payload);
+  if (!job) return null;
+
+  await redis.lpush(processingKey(workerName), payload);
 
   return job;
 }
 
-export async function ackVideoJob(job: VideoJob) {
-  await redis.lrem(VIDEO_PROCESSING_KEY, 1, serializeJob(job));
+export async function ackVideoJob(workerName: string, job: VideoJob) {
+  await redis.lrem(processingKey(workerName), 1, serializeVideoJob(job));
 }
 
-export async function retryVideoJob(job: VideoJob, maxAttempts = 3) {
+export async function retryVideoJob(
+  workerName: string,
+  job: VideoJob,
+  maxAttempts = 3,
+) {
   const attempts = (job.attempts ?? 0) + 1;
-  await redis.lrem(VIDEO_PROCESSING_KEY, 1, serializeJob(job));
+  await redis.lrem(processingKey(workerName), 1, serializeVideoJob(job));
 
   if (attempts >= maxAttempts) {
     return false;
   }
 
-  await redis.rpush(VIDEO_QUEUE_KEY, serializeJob({ ...job, attempts }));
+  await redis.rpush(VIDEO_QUEUE_KEY, serializeVideoJob({ ...job, attempts }));
   return true;
 }
 
-export async function recoverProcessingJobs() {
-  const stuckJobs = await redis.lrange(VIDEO_PROCESSING_KEY, 0, -1);
-  if (!stuckJobs.length) return 0;
+export async function updateWorkerHeartbeat(workerName: string) {
+  await redis.set(workerHeartbeatKey(workerName), new Date().toISOString(), "EX", 120);
+}
+
+export async function recoverStaleProcessingJobs() {
+  const processingKeys = await getProcessingKeys();
+  if (!processingKeys.length) return 0;
 
   const queuedRaw = await redis.lrange(VIDEO_QUEUE_KEY, 0, -1);
   const queuedIdentities = new Set(
@@ -113,19 +120,37 @@ export async function recoverProcessingJobs() {
   );
   const recoveredIdentities = new Set<string>();
   const pipeline = redis.pipeline();
-  for (const raw of stuckJobs) {
-    const job = parseVideoJob(raw);
-    pipeline.lrem(VIDEO_PROCESSING_KEY, 1, raw);
-    if (!job) continue;
 
-    const identity = jobIdentity(job);
-    if (queuedIdentities.has(identity) || recoveredIdentities.has(identity)) {
-      continue;
+  for (const key of processingKeys) {
+    const workerName = key.startsWith(VIDEO_PROCESSING_PREFIX)
+      ? key.substring(VIDEO_PROCESSING_PREFIX.length)
+      : "legacy";
+    const heartbeat =
+      key === LEGACY_VIDEO_PROCESSING_KEY
+        ? null
+        : await redis.get(workerHeartbeatKey(workerName));
+    const heartbeatMs = heartbeat ? new Date(heartbeat).getTime() : 0;
+    const workerIsAlive =
+      heartbeatMs > 0 && Date.now() - heartbeatMs < STALE_WORKER_MS;
+
+    if (workerIsAlive) continue;
+
+    const stuckJobs = await redis.lrange(key, 0, -1);
+    for (const raw of stuckJobs) {
+      const job = parseVideoJob(raw);
+      pipeline.lrem(key, 1, raw);
+      if (!job) continue;
+
+      const identity = jobIdentity(job);
+      if (queuedIdentities.has(identity) || recoveredIdentities.has(identity)) {
+        continue;
+      }
+
+      recoveredIdentities.add(identity);
+      pipeline.rpush(VIDEO_QUEUE_KEY, raw);
     }
-
-    recoveredIdentities.add(identity);
-    pipeline.rpush(VIDEO_QUEUE_KEY, raw);
   }
+
   await pipeline.exec();
 
   return recoveredIdentities.size;
@@ -137,7 +162,7 @@ export async function removeVideoJobs(videoIds: string[]) {
 
   const [queuedRaw, processingRaw] = await Promise.all([
     redis.lrange(VIDEO_QUEUE_KEY, 0, -1),
-    redis.lrange(VIDEO_PROCESSING_KEY, 0, -1),
+    getAllProcessingJobPayloads(),
   ]);
 
   let removed = 0;
@@ -147,7 +172,9 @@ export async function removeVideoJobs(videoIds: string[]) {
     const job = parseVideoJob(raw);
     if (job?.kind === "PROCESS_VIDEO" && ids.has(job.videoId)) {
       pipeline.lrem(VIDEO_QUEUE_KEY, 0, raw);
-      pipeline.lrem(VIDEO_PROCESSING_KEY, 0, raw);
+      for (const key of await getProcessingKeys()) {
+        pipeline.lrem(key, 0, raw);
+      }
       removed++;
     }
   }
@@ -162,7 +189,7 @@ export async function removeVideoJobs(videoIds: string[]) {
 export async function getVideoQueueMetrics() {
   const [queuedRaw, processingRaw] = await Promise.all([
     redis.lrange(VIDEO_QUEUE_KEY, 0, -1),
-    redis.lrange(VIDEO_PROCESSING_KEY, 0, -1),
+    getAllProcessingJobPayloads(),
   ]);
 
   const queuedJobs = queuedRaw.map(parseVideoJob).filter(Boolean) as VideoJob[];
@@ -205,6 +232,10 @@ export async function getVideoQueueMetrics() {
         (job): job is ProcessVideoJob =>
           job.kind === "PROCESS_VIDEO" && isValidJob(job),
       )
+      .filter((job, index, jobs) => {
+        const identity = jobIdentity(job);
+        return jobs.findIndex((item) => jobIdentity(item) === identity) === index;
+      })
       .map((job) => job.videoId),
     staleJobs:
       queuedJobs.filter((job) => !isValidJob(job)).length +
@@ -215,7 +246,7 @@ export async function getVideoQueueMetrics() {
 export async function purgeStaleVideoJobs() {
   const [queuedRaw, processingRaw] = await Promise.all([
     redis.lrange(VIDEO_QUEUE_KEY, 0, -1),
-    redis.lrange(VIDEO_PROCESSING_KEY, 0, -1),
+    getAllProcessingJobPayloads(),
   ]);
 
   const jobs = [...queuedRaw, ...processingRaw]
@@ -273,9 +304,12 @@ export async function purgeStaleVideoJobs() {
 
   const pipeline = redis.pipeline();
   pipeline.del(VIDEO_QUEUE_KEY);
-  pipeline.del(VIDEO_PROCESSING_KEY);
+  const processingKeys = await getProcessingKeys();
+  for (const key of processingKeys) pipeline.del(key);
   for (const raw of queued.kept) pipeline.rpush(VIDEO_QUEUE_KEY, raw);
-  for (const raw of processing.kept) pipeline.rpush(VIDEO_PROCESSING_KEY, raw);
+  if (processing.kept.length > 0) {
+    pipeline.rpush(processingKey("recovered"), ...processing.kept);
+  }
   await pipeline.exec();
 
   return removed;
@@ -312,4 +346,35 @@ export async function getVideoJobProgress(videoIds: string[]) {
       }
     })
     .filter((value): value is VideoJobProgress => Boolean(value));
+}
+
+function processingKey(workerName: string) {
+  return `${VIDEO_PROCESSING_PREFIX}${workerName}`;
+}
+
+function workerHeartbeatKey(workerName: string) {
+  return `${WORKER_HEARTBEAT_PREFIX}${workerName}:heartbeat`;
+}
+
+async function getAllProcessingJobPayloads() {
+  const keys = await getProcessingKeys();
+  if (!keys.length) return [];
+
+  const payloads = await Promise.all(keys.map((key) => redis.lrange(key, 0, -1)));
+  return payloads.flat();
+}
+
+async function getProcessingKeys() {
+  const keys = await redis.keys(`${VIDEO_PROCESSING_PREFIX}*`);
+  const legacyExists = await redis.exists(LEGACY_VIDEO_PROCESSING_KEY);
+  return legacyExists ? [...keys, LEGACY_VIDEO_PROCESSING_KEY] : keys;
+}
+
+async function getAllQueueJobPayloads() {
+  const [queuedRaw, processingRaw] = await Promise.all([
+    redis.lrange(VIDEO_QUEUE_KEY, 0, -1),
+    getAllProcessingJobPayloads(),
+  ]);
+
+  return [...queuedRaw, ...processingRaw];
 }

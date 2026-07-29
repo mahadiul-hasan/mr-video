@@ -10,10 +10,11 @@ import {
   clearVideoJobProgress,
   enqueueVideoJob,
   purgeStaleVideoJobs,
-  recoverProcessingJobs,
+  recoverStaleProcessingJobs,
   reserveVideoJob,
   retryVideoJob,
   setVideoJobProgress,
+  updateWorkerHeartbeat,
 } from "@/lib/video-processing/queue";
 import { deletePrefix, processVideoJob } from "@/lib/video-processing/processor";
 
@@ -50,7 +51,7 @@ function isNonRetryableError(error: unknown) {
 }
 
 async function handleOne() {
-  const job = await reserveVideoJob(5);
+  const job = await reserveVideoJob(WORKER_NAME, 5);
   if (!job) return;
 
   try {
@@ -70,7 +71,7 @@ async function handleOne() {
       });
 
       if (!videoExists) {
-        await ackVideoJob(job);
+        await ackVideoJob(WORKER_NAME, job);
         await clearVideoJobProgress(job.videoId);
         console.warn(
           `Skipped stale video job because video ${job.videoId} no longer exists.`,
@@ -94,16 +95,16 @@ async function handleOne() {
       await deletePrefix(job.prefix);
     }
 
-    await ackVideoJob(job);
+    await ackVideoJob(WORKER_NAME, job);
     if (job.kind === "PROCESS_VIDEO") {
       await clearVideoJobProgress(job.videoId);
     }
   } catch (error) {
     const requeued = isNonRetryableError(error)
       ? false
-      : await retryVideoJob(job, 3);
+      : await retryVideoJob(WORKER_NAME, job, 3);
     if (!requeued) {
-      await ackVideoJob(job);
+      await ackVideoJob(WORKER_NAME, job);
       if (job.kind === "PROCESS_VIDEO") {
         await clearVideoJobProgress(job.videoId);
       }
@@ -170,12 +171,14 @@ async function recoverOrphanProcessingVideos() {
 async function main() {
   await assertMediaToolsInstalled();
   await redis.set(WORKER_HEARTBEAT_KEY, new Date().toISOString());
+  await updateWorkerHeartbeat(WORKER_NAME);
   const heartbeat = setInterval(() => {
     void redis.set(WORKER_HEARTBEAT_KEY, new Date().toISOString());
+    void updateWorkerHeartbeat(WORKER_NAME);
   }, 10000);
   heartbeat.unref();
 
-  const recovered = await recoverProcessingJobs();
+  const recovered = await recoverStaleProcessingJobs();
   if (recovered > 0) {
     console.log(`Recovered ${recovered} stuck video job(s).`);
   }

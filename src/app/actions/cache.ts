@@ -15,6 +15,7 @@ import prisma from "@/lib/prisma";
 import {
   getVideoJobProgress,
   getVideoQueueMetrics,
+  purgeStaleVideoJobs,
 } from "@/lib/video-processing/queue";
 
 export interface CacheStatsData {
@@ -92,6 +93,7 @@ export async function getVideoQueueStatus(): Promise<{
 }> {
   try {
     await requireAdmin();
+    await purgeStaleVideoJobs();
 
     const [
       queueMetrics,
@@ -119,16 +121,36 @@ export async function getVideoQueueStatus(): Promise<{
         take: 5,
       }),
     ]);
-    const [progressEntries, progressVideos] = await Promise.all([
+    const [progressEntries, progressVideos, fallbackProcessingVideos] =
+      await Promise.all([
       getVideoJobProgress(queueMetrics.processingVideoIds),
       prisma.video.findMany({
         where: { id: { in: queueMetrics.processingVideoIds } },
         select: { id: true, title: true },
       }),
+      prisma.video.findMany({
+        where: { status: "PROCESSING" },
+        select: { id: true, title: true, updatedAt: true },
+        orderBy: { updatedAt: "asc" },
+        take: 10,
+      }),
     ]);
     const titleById = new Map(
       progressVideos.map((video) => [video.id, video.title]),
     );
+    const progressIds = new Set(progressEntries.map((progress) => progress.videoId));
+    const fallbackProgress = fallbackProcessingVideos
+      .filter((video) => !progressIds.has(video.id))
+      .map((video) => ({
+        videoId: video.id,
+        title: video.title,
+        stage: "waiting",
+        percent: queueMetrics.processingVideoIds.includes(video.id) ? 1 : 0,
+        message: queueMetrics.processingVideoIds.includes(video.id)
+          ? "Worker has reserved this job"
+          : "Waiting for worker to pick up this processing video",
+        updatedAt: video.updatedAt.toISOString(),
+      }));
 
     const workerLastSeenMs = workerLastSeenAt
       ? new Date(workerLastSeenAt).getTime()
@@ -151,10 +173,13 @@ export async function getVideoQueueStatus(): Promise<{
           ...video,
           updatedAt: video.updatedAt.toISOString(),
         })),
-        activeProgress: progressEntries.map((progress) => ({
-          ...progress,
-          title: titleById.get(progress.videoId) ?? "Processing video",
-        })),
+        activeProgress: [
+          ...progressEntries.map((progress) => ({
+            ...progress,
+            title: titleById.get(progress.videoId) ?? "Processing video",
+          })),
+          ...fallbackProgress,
+        ],
       },
     };
   } catch (error) {
