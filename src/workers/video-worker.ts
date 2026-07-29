@@ -55,6 +55,15 @@ async function handleOne() {
 
   try {
     if (job.kind === "PROCESS_VIDEO") {
+      await setVideoJobProgress({
+        videoId: job.videoId,
+        workerName: WORKER_NAME,
+        stage: "reserved",
+        percent: 1,
+        message: "Worker picked up the video job",
+        updatedAt: new Date().toISOString(),
+      });
+
       const videoExists = await prisma.video.findUnique({
         where: { id: job.videoId },
         select: { id: true },

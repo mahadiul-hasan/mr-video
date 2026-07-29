@@ -193,6 +193,9 @@ export async function getVideoQueueMetrics() {
   const uniqueValidProcessing = new Set(
     processingJobs.filter(isValidJob).map(jobIdentity),
   );
+  for (const identity of uniqueValidProcessing) {
+    uniqueValidQueued.delete(identity);
+  }
 
   return {
     queuedJobs: uniqueValidQueued.size,
@@ -233,8 +236,8 @@ export async function purgeStaleVideoJobs() {
     ).map((video) => video.id),
   );
 
+  const seen = new Set<string>();
   const normalizeList = (items: string[]) => {
-    const seen = new Set<string>();
     const kept: string[] = [];
     let removed = 0;
 
@@ -263,8 +266,8 @@ export async function purgeStaleVideoJobs() {
     return { kept, removed };
   };
 
-  const queued = normalizeList(queuedRaw);
   const processing = normalizeList(processingRaw);
+  const queued = normalizeList(queuedRaw);
   const removed = queued.removed + processing.removed;
   if (removed === 0) return 0;
 
